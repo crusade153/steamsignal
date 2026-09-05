@@ -78,7 +78,8 @@ GitHub Actions (10분마다 curl 1회)
 | 스키마·함수 실제 실행 | 검증됨 (2026-09-05) |
 | 종단 수집 (Steam → Neon) | 검증됨 — 잡 5종 전부 성공 |
 | `/api/cron` 배포 동작 | **검증됨** — 인증 401/200 양쪽, 잡 실행까지 확인 |
-| GitHub Actions 스케줄러 | **검증됨** — workflow_dispatch 로 종단 성공 (11초) |
+| GitHub Actions 스케줄러 (수동 실행) | **검증됨** — workflow_dispatch 로 종단 성공 (11초) |
+| **스케줄 자동 발화** | **미확인** — secrets 등록 후 2시간이 지나도 `schedule` 이벤트 실행이 뜨지 않았다. §3-1 참고 |
 | SSR 페이지·사이트맵·구조화 데이터 | **검증됨** — `node check.mjs --live` 가 배포를 직접 확인 |
 | CDN 캐시 | **검증됨** — `X-Vercel-Cache: HIT`. DB 는 페이지당 10분에 한 번만 읽힌다 |
 | 고정 문서 · 위시리스트 왕복 | 검증됨 — e2e 가 담기→목록→빼기까지 확인 |
@@ -88,6 +89,34 @@ GitHub Actions (10분마다 curl 1회)
 | **장시간 누적 동작** | **미검증** — 롤업 겹치기와 `prune` 의 실제 삭제는 데이터가 더 쌓여야 확인된다 |
 | 급상승 쿼리의 실제 산출 | 검증됨 — 창을 좁혀(1h vs 4h) 돌리자 실제 순위가 나왔다 (War Thunder +8.4% 등) |
 | **`/rising` 의 기본 창(24h vs 7일)** | **미검증** — 시간 롤업이 그만큼 쌓여야 첫 순위가 뜬다. 그전까지는 창을 좁혀 표기한다 |
+
+### 3-1. 스케줄 자동 발화가 안 뜨는 건에 대하여
+
+워크플로는 `active` 이고 수동 실행(`workflow_dispatch`)은 성공한다. 그런데
+`*/10 * * * *` 스케줄이 아직 한 번도 자동으로 뜨지 않았다.
+
+```bash
+gh run list -R crusade153/steamsignal -w Collect -e schedule -L 5   # 비어 있으면 아직 안 뜬 것
+```
+
+가능성이 높은 순서대로:
+
+1. **GitHub 스케줄 지연** — 문서에도 "부하가 높으면 지연되거나 건너뛸 수 있다"고 적혀 있다.
+   `*/10` 처럼 정각·10분 단위는 전 세계에서 가장 붐비는 시각이라 특히 밀린다.
+   새로 추가된 스케줄이 처음 돌기까지 시간이 걸리기도 한다.
+2. **그래도 안 뜨면** — cron 을 `3,13,23,33,43,53 * * * *` 처럼 어긋난 분으로 바꿔 본다.
+   붐비는 정각을 피하는 것만으로 개선되는 경우가 많다.
+3. **그래도 안 뜨면** — §6 의 대안으로 옮긴다. cron-job.org 나 Upstash QStash 는 무료 티어가 있고
+   `/api/cron` 을 그대로 호출하면 되므로 코드 변경이 필요 없다. Vercel Pro 라면 `vercel.json` 의
+   crons 블록([docs/DATA-PIPELINE.md §5](docs/DATA-PIPELINE.md))으로 옮긴다.
+
+**확인 방법은 워크플로 실행 목록이 아니라 DB 다.** 스케줄러가 돌고 있다면
+`player_snapshots` 의 최신 `captured_at` 이 20분 안쪽이어야 한다.
+
+```sql
+SELECT MAX(captured_at) FROM player_snapshots;
+SELECT job, status, started_at FROM collector_runs ORDER BY started_at DESC LIMIT 5;
+```
 
 ### 하루 뒤에 꼭 볼 것
 
