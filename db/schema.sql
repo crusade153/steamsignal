@@ -185,3 +185,82 @@ CREATE TABLE IF NOT EXISTS collector_runs (
   error       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_collector_runs_job ON collector_runs (job, started_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- 9. subscribers — 이메일 구독자. **이 사이트가 개인정보를 보관하는 유일한 테이블이다.**
+--
+--    설계 규율 셋. 셋 다 어기면 법적 문제이거나 스팸 신고로 도메인이 죽는다.
+--      1. 더블 옵트인. confirmed_at 이 NULL 인 주소로는 확인 메일 외에 아무것도 보내지 않는다.
+--      2. 모든 메일에 수신거부 링크. unsubscribe_token 은 주소마다 하나이며 영구적이다.
+--      3. IP·User-Agent 를 남기지 않는다. 그래서 남용 방지도 IP 가 아니라
+--         '주소별 재발송 간격 + 시간당 미확인 가입 상한'으로 한다(lib/alerts.mjs).
+--
+--    해지는 행을 지우지 않고 unsubscribed_at 을 찍는다. 지워 버리면 같은 주소가
+--    재가입할 때 "예전에 거부했던 사람"인지 알 수 없어 다시 메일을 보내게 된다.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS subscribers (
+  id                BIGSERIAL   PRIMARY KEY,
+  email             TEXT        NOT NULL UNIQUE,
+  confirm_token     TEXT        NOT NULL UNIQUE,
+  unsubscribe_token TEXT        NOT NULL UNIQUE,
+  weekly_report     BOOLEAN     NOT NULL DEFAULT TRUE,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  confirm_sent_at   TIMESTAMPTZ,
+  confirmed_at      TIMESTAMPTZ,
+  unsubscribed_at   TIMESTAMPTZ,
+  last_sent_at      TIMESTAMPTZ,
+  send_failures     SMALLINT    NOT NULL DEFAULT 0
+);
+
+COMMENT ON COLUMN subscribers.email IS
+  '소문자로 정규화해서 넣는다. 대소문자만 다른 중복 가입이 생기면 같은 사람에게 두 번 발송된다.';
+COMMENT ON COLUMN subscribers.confirmed_at IS
+  '더블 옵트인 완료 시각. NULL 이면 확인 메일 외에는 무엇도 보내지 않는다.';
+COMMENT ON COLUMN subscribers.unsubscribed_at IS
+  '해지 시각. 행을 지우지 않는 이유는 재가입 시 과거 거부 이력을 잃지 않기 위해서다.';
+
+-- 발송 대상 조회는 항상 "확인됐고 해지하지 않은" 조건이라 부분 인덱스가 정확히 맞는다.
+CREATE INDEX IF NOT EXISTS idx_subscribers_active
+  ON subscribers (id) WHERE confirmed_at IS NOT NULL AND unsubscribed_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- 10. price_alerts — 게임별 가격 하락 알림 구독.
+--     notified_price 는 워터마크다. 한 번 알린 가격보다 더 내려갔을 때만 다시 알린다.
+--     -> 같은 할인으로 10분마다 메일이 가는 사고를 이 컬럼 하나가 막는다.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS price_alerts (
+  id             BIGSERIAL   PRIMARY KEY,
+  subscriber_id  BIGINT      NOT NULL REFERENCES subscribers(id) ON DELETE CASCADE,
+  appid          INTEGER     NOT NULL REFERENCES apps(appid) ON DELETE CASCADE,
+  target_price   INTEGER,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  notified_at    TIMESTAMPTZ,
+  notified_price INTEGER,
+  UNIQUE (subscriber_id, appid)
+);
+
+COMMENT ON COLUMN price_alerts.target_price IS
+  '통화 최소단위 x100 (app_stats.final_price 와 같은 단위). NULL 이면 "할인이 시작되면 언제든".';
+COMMENT ON COLUMN price_alerts.notified_price IS
+  '마지막으로 알린 가격. 가격이 다시 오르면 lib/collect.mjs 의 alerts 잡이 NULL 로 되돌린다.';
+
+CREATE INDEX IF NOT EXISTS idx_price_alerts_app ON price_alerts (appid);
+
+-- ---------------------------------------------------------------------------
+-- 11. mail_deliveries — 발송 원장. **보내기 전에 먼저 쓴다.**
+--     dedupe_key 의 UNIQUE 제약이 "이미 보냈다"를 판정하는 유일한 근거다.
+--     크론이 두 번 돌거나 발송 도중 함수가 죽어도 같은 메일이 두 번 나가지 않는다
+--     (죽으면 pending 으로 남고 재발송하지 않는다 — 중복 발송보다 누락이 낫다).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS mail_deliveries (
+  id            BIGSERIAL   PRIMARY KEY,
+  subscriber_id BIGINT      REFERENCES subscribers(id) ON DELETE CASCADE,
+  kind          TEXT        NOT NULL CHECK (kind IN ('confirm', 'alert', 'weekly')),
+  dedupe_key    TEXT        NOT NULL UNIQUE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  sent_at       TIMESTAMPTZ,
+  status        TEXT        NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'sent', 'error')),
+  error         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mail_deliveries_time ON mail_deliveries (created_at DESC);

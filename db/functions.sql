@@ -117,3 +117,41 @@ BEGIN
   RETURN affected;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ---------------------------------------------------------------------------
+-- 구독 데이터 보관정책. 시계열과 달리 이건 **개인정보**라 용량이 아니라 원칙의 문제다.
+-- 보관할 근거가 사라진 주소는 지운다.
+--
+--   확인하지 않은 가입  -> 30일. 동의하지 않은 주소를 계속 들고 있을 이유가 없다.
+--   해지한 주소         -> 30일. 그 뒤 재가입하려면 본인이 다시 더블 옵트인을 해야 한다.
+--   발송 원장           -> 90일. 중복 발송 판정은 그보다 짧은 기간만 필요하다.
+--
+-- 이 기간은 /privacy 에 그대로 적혀 있다. 여기를 고치면 그 페이지도 같이 고친다.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION prune_subscriptions(
+  p_pending_days   INTEGER DEFAULT 30,
+  p_dropped_days   INTEGER DEFAULT 30,
+  p_delivery_days  INTEGER DEFAULT 90
+)
+RETURNS TABLE (pending_deleted BIGINT, dropped_deleted BIGINT, deliveries_deleted BIGINT) AS $$
+DECLARE
+  pending    BIGINT;
+  dropped    BIGINT;
+  deliveries BIGINT;
+BEGIN
+  DELETE FROM subscribers
+   WHERE confirmed_at IS NULL
+     AND created_at < NOW() - make_interval(days => p_pending_days);
+  GET DIAGNOSTICS pending = ROW_COUNT;
+
+  DELETE FROM subscribers
+   WHERE unsubscribed_at IS NOT NULL
+     AND unsubscribed_at < NOW() - make_interval(days => p_dropped_days);
+  GET DIAGNOSTICS dropped = ROW_COUNT;
+
+  DELETE FROM mail_deliveries WHERE created_at < NOW() - make_interval(days => p_delivery_days);
+  GET DIAGNOSTICS deliveries = ROW_COUNT;
+
+  RETURN QUERY SELECT pending, dropped, deliveries;
+END;
+$$ LANGUAGE plpgsql;
