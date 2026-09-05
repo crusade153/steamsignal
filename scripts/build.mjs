@@ -2,7 +2,7 @@ import { access, readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 
-for (const file of ['server.mjs', 'lib/steam.mjs', 'lib/http.mjs', 'public/app.js', 'api/games.js', 'api/game-details.js', 'api/health.js', 'api/cron.js', 'lib/db.mjs', 'lib/collect.mjs', 'lib/queries.mjs', 'lib/render.mjs', 'lib/routes.mjs', 'lib/pages.mjs', 'api/page.js', 'api/sitemap.js', 'scripts/collect.mjs']) {
+for (const file of ['server.mjs', 'lib/steam.mjs', 'lib/http.mjs', 'public/app.js', 'public/watchlist.js', 'public/watch-button.js', 'api/games.js', 'api/game-details.js', 'api/health.js', 'api/cron.js', 'lib/db.mjs', 'lib/collect.mjs', 'lib/queries.mjs', 'lib/render.mjs', 'lib/routes.mjs', 'lib/pages.mjs', 'lib/legal.mjs', 'api/page.js', 'api/sitemap.js', 'scripts/collect.mjs']) {
   execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
 }
 for (const file of ['public/index.html', 'public/styles.css', 'public/pages.css', 'public/favicon.svg', 'public/robots.txt', 'public/og-cover.png']) await access(file);

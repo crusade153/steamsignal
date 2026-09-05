@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { handleApi } from './lib/http.mjs';
 import { matchRoute } from './lib/routes.mjs';
 import { HANDLERS, notFound, serverError, sitemap } from './lib/pages.mjs';
-import { getSql } from './lib/db.mjs';
+import { getSql, lazySql } from './lib/db.mjs';
 
 const publicRoot = fileURLToPath(new URL('./public/', import.meta.url));
 const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml; charset=utf-8' };
@@ -33,7 +33,7 @@ const server = createServer(async (req, res) => {
   const route = matchRoute(url.pathname);
   if (route) {
     const handle = HANDLERS[route.name];
-    return renderPage(req, res, () => (handle ? handle(getSql(), route.params) : notFound()));
+    return renderPage(req, res, () => (handle ? handle(lazySql(), route.params) : notFound()));
   }
 
   try {
@@ -48,4 +48,12 @@ const server = createServer(async (req, res) => {
     res.end('Bad Request');
   }
 });
-server.listen(Number(process.env.PORT || 5174), '127.0.0.1', () => console.log(`Steam Pulse ready at http://127.0.0.1:${server.address().port}`));
+server.listen(Number(process.env.PORT || 5174), '127.0.0.1', () => {
+  console.log(`Steam Pulse ready at http://127.0.0.1:${server.address().port}`);
+  // 읽기 경로가 전부 DB 를 거치므로 이게 없으면 화면에 아무 값도 안 나온다.
+  // 페이지마다 503 을 보고 원인을 짐작하게 두지 말고 여기서 한 번에 말해 준다.
+  if (!process.env.DATABASE_URL) {
+    console.warn('경고: DATABASE_URL 이 없습니다. 목록과 SSR 페이지가 전부 비어 보입니다.');
+    console.warn('      .env 를 만들고 (.env.example 참고) `npm run dev` 로 다시 실행하세요.');
+  }
+});

@@ -2,7 +2,7 @@
 // 이 함수로 넘기면서 ?route=<이름> 을 붙여 준다.
 //
 // 이 파일은 HTTP 만 담당한다. 무엇을 그릴지는 lib/pages.mjs 가, 무엇을 읽을지는 lib/queries.mjs 가 안다.
-import { getSql } from '../lib/db.mjs';
+import { lazySql } from '../lib/db.mjs';
 import { HANDLERS, notFound, serverError } from '../lib/pages.mjs';
 import { decodeParam } from '../lib/routes.mjs';
 
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
   let result;
   try {
     result = handle
-      ? await handle(getSql(), {
+      ? await handle(lazySql(), {
         slug: decodeParam(url.searchParams.get('slug')),
         genre: decodeParam(url.searchParams.get('genre'))
       })

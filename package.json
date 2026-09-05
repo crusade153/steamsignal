@@ -5,12 +5,12 @@
   "description": "Steam 인기 TOP 100, 플레이어 수와 평가를 함께 보는 Steam Pulse",
   "type": "module",
   "scripts": {
-    "start": "node server.mjs",
-    "dev": "node --watch server.mjs",
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "dev": "node --env-file-if-exists=.env --watch server.mjs",
     "build": "node scripts/build.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:e2e": "node check.mjs",
-    "collect": "node scripts/collect.mjs",
+    "collect": "node --env-file-if-exists=.env scripts/collect.mjs",
     "db:migrate": "psql \"$DATABASE_URL_DIRECT\" -f db/schema.sql -f db/functions.sql"
   },
   "devDependencies": {

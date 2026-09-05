@@ -4,9 +4,10 @@ import { readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 
 import { ROUTES, rewrites, matchRoute, decodeParam } from '../lib/routes.mjs';
-import { esc, escXml, lineChart, formatDay, won, gameCell, gamePath, safeImage, layout } from '../lib/render.mjs';
+import { esc, escXml, lineChart, formatDay, won, gameCell, gamePath, safeImage, layout, adSlot } from '../lib/render.mjs';
 import { parseGameSlug, gamePage, risingPage, sitemap, RISING_WINDOWS } from '../lib/pages.mjs';
 import { serializeGame } from '../lib/http.mjs';
+import { LEGAL_HANDLERS } from '../lib/legal.mjs';
 
 // DB 없이 페이지 로직을 검증한다. 쿼리 텍스트에 든 테이블 이름으로 어느 질문인지 알아내고
 // 미리 정해 둔 행을 돌려준다. 어떤 쿼리가 몇 번 나갔는지도 함께 기록한다.
@@ -265,4 +266,111 @@ test('링크 공유용 og:image 는 어느 페이지에도 빠지지 않는다',
   const hostile = layout({ title: 't', description: 'd', path: '/x', image: 'https://evil.example.com/x.jpg', body: '' });
   assert.ok(!hostile.includes('evil.example.com'));
   assert.match(hostile, /og:image" content="[^"]+\/og-cover\.png"/);
+});
+
+// --- P1 고정 문서 · 광고 -----------------------------------------------------
+
+test('법적 문서 3종은 색인 가능하고 canonical 을 갖는다', () => {
+  // 애드센스 심사가 실제로 확인하는 페이지들이다. noindex 가 붙으면 심사에서 못 본다.
+  for (const [name, path] of [['privacy', '/privacy'], ['terms', '/terms'], ['contact', '/contact']]) {
+    const { status, body, headers } = LEGAL_HANDLERS[name]();
+    assert.equal(status, 200, `${path} 가 200 이 아니다`);
+    assert.match(headers['Content-Type'], /text\/html/);
+    assert.ok(body.includes(`rel="canonical" href="http`), `${path} 에 canonical 이 없다`);
+    assert.ok(!body.includes('name="robots"'), `${path} 는 색인돼야 한다`);
+    assert.equal(body.match(/<h1>/g).length, 1, `${path} 의 h1 은 하나여야 한다`);
+  }
+});
+
+test('법적 문서는 사이트맵에도 실린다', async () => {
+  const { body } = await sitemap(fakeSql());
+  for (const path of ['/privacy', '/terms', '/contact']) {
+    assert.ok(body.includes(`${path}</loc>`), `${path} 가 사이트맵에 없다`);
+  }
+  // 위시리스트는 사람마다 다른 화면이라 색인 대상이 아니다.
+  assert.ok(!body.includes('/watchlist</loc>'));
+});
+
+test('위시리스트 페이지는 색인되지 않고 캐시되지 않는다', () => {
+  const { status, body, headers } = LEGAL_HANDLERS.watchlist();
+  assert.equal(status, 200);
+  assert.equal(headers['Cache-Control'], 'no-store', 'CDN 이 남의 화면을 캐시하면 안 된다');
+  assert.ok(body.includes('noindex'));
+  assert.ok(body.includes('/watchlist.js'));
+});
+
+test('ads.txt 는 게시자 ID 가 있을 때만 존재한다', async () => {
+  // 내용이 틀린 ads.txt 는 없는 것보다 나쁘다 — 정상 광고 요청까지 거부된다.
+  const off = LEGAL_HANDLERS.ads();
+  assert.equal(off.status, 404);
+
+  const script = `
+    process.env.ADSENSE_PUBLISHER_ID = 'ca-pub-1234567890123456';
+    const { adsTxt } = await import('./lib/legal.mjs');
+    const r = adsTxt();
+    console.log(JSON.stringify({ status: r.status, body: r.body }));`;
+  const out = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: new URL('..', import.meta.url), encoding: 'utf8'
+  }).trim());
+  assert.equal(out.status, 200);
+  assert.equal(out.body, 'google.com, pub-1234567890123456, DIRECT, f08c47fec0942fa0\n');
+});
+
+test('광고 슬롯은 게시자 ID 가 없으면 자리조차 잡지 않는다', () => {
+  assert.equal(adSlot('123'), '');
+  assert.equal(adSlot(undefined), '');
+});
+
+test('광고 슬롯은 높이를 미리 예약한다 (CLS 방어)', () => {
+  // 광고가 늦게 로드되며 아래 내용을 밀어내면 CLS 가 무너지고 사용자가 누르려던 링크가 어긋난다.
+  const script = `
+    process.env.ADSENSE_PUBLISHER_ID = 'ca-pub-1234567890123456';
+    const { adSlot } = await import('./lib/render.mjs');
+    console.log(adSlot('9876543210', { minHeight: 280 }));`;
+  const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: new URL('..', import.meta.url), encoding: 'utf8'
+  });
+  assert.match(out, /min-height:280px/);
+  assert.match(out, /data-ad-client="ca-pub-1234567890123456"/);
+  assert.match(out, /data-ad-slot="9876543210"/);
+});
+
+test('분석 스크립트는 배포 환경에서만 나간다', () => {
+  // 로컬에서 켜면 /_vercel/insights/script.js 가 404 HTML 을 돌려주고 콘솔 오류만 남는다.
+  const render = path => execFileSync(process.execPath, ['--input-type=module', '-e',
+    `const { layout } = await import('./lib/render.mjs');
+     console.log(layout({ title: 't', description: 'd', path: '/x', body: '' }).includes('_vercel/insights'));`],
+  { cwd: new URL('..', import.meta.url), encoding: 'utf8', env: path }).trim();
+
+  assert.equal(render({ ...process.env, VERCEL: undefined }), 'false');
+  assert.equal(render({ ...process.env, VERCEL: '1' }), 'true');
+  assert.equal(render({ ...process.env, VERCEL: '1', VERCEL_ANALYTICS: '0' }), 'false');
+});
+
+test('모든 페이지 하단에 방침·약관·문의 링크가 있다', () => {
+  // 애드센스 심사는 이 링크들이 사이트 전역에서 닿는지를 본다.
+  const page = layout({ title: 't', description: 'd', path: '/x', body: '' });
+  for (const href of ['/privacy', '/terms', '/contact']) {
+    assert.ok(page.includes(`href="${href}"`), `푸터에 ${href} 링크가 없다`);
+  }
+});
+
+test('DB 를 읽지 않는 페이지는 DATABASE_URL 이 없어도 뜬다', async () => {
+  // 방침·약관·문의·위시리스트 껍데기는 질의가 없다. 라우터가 클라이언트를 미리 만들면
+  // DATABASE_URL 이 없는 환경에서 이 페이지들까지 503 이 된다.
+  const script = `
+    delete process.env.DATABASE_URL;
+    const { lazySql } = await import('./lib/db.mjs');
+    const { HANDLERS } = await import('./lib/pages.mjs');
+    const out = {};
+    for (const name of ['privacy', 'terms', 'contact', 'watchlist', 'ads']) {
+      out[name] = (await HANDLERS[name](lazySql(), {})).status;
+    }
+    // 반대로 DB 가 필요한 페이지는 여기서 던져야 한다 — 조용히 빈 화면을 내면 안 된다.
+    out.gameThrows = await HANDLERS.game(lazySql(), { slug: '730' }).then(() => false, () => true);
+    console.log(JSON.stringify(out));`;
+  const out = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: new URL('..', import.meta.url), encoding: 'utf8'
+  }).trim());
+  assert.deepEqual(out, { privacy: 200, terms: 200, contact: 200, watchlist: 200, ads: 404, gameThrows: true });
 });

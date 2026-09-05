@@ -30,7 +30,9 @@ npm run dev
 | `/deals` | Steam 긍정률 75% 이상인 할인. 우리 가격 이력으로 역대 최저가 여부를 표시 |
 | `/charts/weekly` | 최근 7일 평균 동접 순위. 하루짜리 이벤트에 흔들리지 않습니다 |
 | `/genre`, `/genre/<장르>` | 장르 허브 |
-| `/sitemap.xml`, `/robots.txt` | 색인용 |
+| `/watchlist` | 담아 둔 게임의 현재가·할인·평가. **계정 없이 브라우저에만 저장**됩니다 |
+| `/privacy`, `/terms`, `/contact` | 개인정보처리방침 · 이용약관 · 문의 |
+| `/sitemap.xml`, `/robots.txt`, `/ads.txt` | 색인·광고용 |
 
 `/` 를 뺀 나머지는 전부 서버에서 HTML 로 렌더링합니다. JavaScript 없이도 내용이 보이고,
 `VideoGame`·`BreadcrumbList` 구조화 데이터와 canonical·OG 메타가 붙습니다.
@@ -83,6 +85,24 @@ server.mjs         로컬 서버 (배포와 같은 렌더러·라우트를 쓴�
 Vercel 은 이 지시를 CDN 에서 쓰고 클라이언트에는 `public, max-age=0` 만 내려 주므로,
 캐시 적중은 응답 헤더가 아니라 `X-Vercel-Cache` 로 확인합니다.
 수집이 25분 이상 갱신되지 않으면 응답에 `stale: true` 를 실어 그대로 알립니다 — 낡은 값을 새 값인 척하지 않습니다.
+
+## 설정 (환경변수)
+
+전부 **없으면 아무것도 렌더링하지 않는다**가 원칙입니다. 자리만 잡아 둔 빈 광고 칸이나
+아직 받을 수 없는 문의 주소를 화면에 내보내는 것보다, 없는 편이 낫습니다.
+
+| 변수 | 없을 때 | 용도 |
+| --- | --- | --- |
+| `DATABASE_URL` | 목록·SSR 페이지가 안내 페이지로 대체 (방침·약관·문의·위시리스트는 그대로 뜸) | Neon pooler 연결 |
+| `CRON_SECRET` | `/api/cron` 이 항상 401 | 수집 트리거 인증 |
+| `SITE_URL` | canonical 이 배포 도메인 추정값 | canonical · sitemap · OG |
+| `ADSENSE_PUBLISHER_ID` | 광고 스크립트도 슬롯도 렌더링되지 않고 `/ads.txt` 는 404 | 애드센스 (`ca-pub-...`) |
+| `ADSENSE_SLOT_DETAIL` | 게임 상세 하단 슬롯 없음 | 애드센스 슬롯 ID |
+| `CONTACT_EMAIL` | 문의 페이지가 GitHub 이슈만 안내 | 문의 주소 |
+| `VERCEL_ANALYTICS=0` | — | Vercel Web Analytics 끄기 (기본은 배포 환경에서 켜짐) |
+
+Vercel Web Analytics 는 쿠키를 쓰지 않으므로 쿠키 동의 배너가 필요 없습니다.
+대시보드에서 Web Analytics 를 켜야 실제 집계가 시작됩니다.
 
 ## 데이터 기준과 한계
 

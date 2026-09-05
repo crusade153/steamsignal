@@ -53,6 +53,26 @@
       "destination": "/api/page?route=genre&genre=:genre"
     },
     {
+      "source": "/watchlist",
+      "destination": "/api/page?route=watchlist"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/api/page?route=privacy"
+    },
+    {
+      "source": "/terms",
+      "destination": "/api/page?route=terms"
+    },
+    {
+      "source": "/contact",
+      "destination": "/api/page?route=contact"
+    },
+    {
+      "source": "/ads.txt",
+      "destination": "/api/page?route=ads"
+    },
+    {
       "source": "/sitemap.xml",
       "destination": "/api/sitemap"
     }

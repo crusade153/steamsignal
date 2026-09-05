@@ -114,6 +114,39 @@ try {
     ssrChecked.push('/sitemap.xml', '/robots.txt');
   }
 
+  // 고정 문서와 위시리스트는 DB 를 읽지 않으므로 픽스처 모드에서도 확인할 수 있다.
+  const docsChecked = [];
+  for (const path of ['/privacy', '/terms', '/contact']) {
+    const response = await page.goto(origin + path, { waitUntil: 'domcontentloaded' });
+    assert.equal(response.status(), 200, `${path} returned ${response.status()}`);
+    assert.equal(await page.locator('h1').count(), 1, `${path} must have exactly one h1`);
+    // 애드센스 심사가 실제로 보는 조건 — 문서가 색인 가능하고 전역에서 닿아야 한다.
+    assert.equal(await page.locator('meta[name="robots"]').count(), 0, `${path} must be indexable`);
+    for (const href of ['/privacy', '/terms', '/contact']) {
+      assert.ok(await page.locator(`footer a[href="${href}"]`).count(), `${path} footer missing ${href}`);
+    }
+    docsChecked.push(path);
+  }
+
+  // 위시리스트 왕복. 담기는 게임 상세에서, 목록은 /watchlist 에서 확인한다.
+  const watched = { appid: 730, title: '위시리스트 픽스처', slug: '730-fixture', path: '/game/730-fixture', headerImage: null, genres: ['액션'], players: 900000, peakToday: 1000000, rank: 1, positiveRatio: 86, reviewTotal: 100, reviewLabel: 'Very Positive', metacritic: null, price: 0, priceFormatted: '무료 플레이', initialPrice: null, discount: 0, isFree: true, playersAt: updatedAt, priceAt: updatedAt, reviewsAt: updatedAt };
+  await page.route('**/api/game-details*', route => route.fulfill({ json: { games: [watched], retrievedAt: updatedAt } }));
+
+  await page.goto(`${origin}/watchlist`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#watchlistBody .empty-panel').waitFor({ timeout: 15000 });
+  assert.match(await page.locator('#watchlistStatus').textContent(), /0개/, 'empty watchlist says zero');
+
+  await page.evaluate(() => localStorage.setItem('steampulse:watchlist:v1', JSON.stringify([730])));
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#watchlistBody tbody tr').first().waitFor({ timeout: 15000 });
+  assert.equal(await page.locator('#watchlistBody tbody tr').count(), 1);
+  assert.match(await page.locator('#watchlistBody tbody tr').first().textContent(), /위시리스트 픽스처/);
+
+  await page.locator('[data-remove]').first().click();
+  await page.locator('#watchlistBody .empty-panel').waitFor({ timeout: 15000 });
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('steampulse:watchlist:v1'))), [],
+    'removing empties the stored list');
+
   if (!live) {
     // 순위를 못 받았을 때 예전 값을 지어내지 않는지. 이 규율이 이 사이트의 신뢰다.
     await page.route('**/api/games', route => route.fulfill({ status: 503, json: { error: '데이터를 불러오지 못했습니다.' } }));
@@ -138,6 +171,7 @@ try {
   console.log(JSON.stringify({
     mode: live ? 'live deployment' : 'deterministic fixtures',
     tested: ['20 rows', '100th rank', 'search', 'sorting', 'real game links', 'mobile',
+      ...docsChecked, 'watchlist round-trip',
       ...(live ? ssrChecked : ['escaped titles', 'missing values stay missing', 'API failure state', 'SSR error page'])],
     runtimeErrors: errors,
     externalResourceFailures: externalFailures,
