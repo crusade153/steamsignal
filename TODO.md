@@ -1,6 +1,6 @@
 # 앞으로 할 일
 
-갱신 2026-09-05 · 라이브 https://steamsignal.vercel.app
+갱신 2026-09-06 · 라이브 https://steamsignal.vercel.app
 
 현재 상태·설계 근거·건드리면 깨지는 지점은 [HANDOFF.md](HANDOFF.md) 에 있다. 이 문서는 **할 일만** 적는다.
 
@@ -72,13 +72,26 @@
 여기서 이메일로 넘어가는 순간 성격이 달라진다 — 개인정보를 보관하게 되고,
 [개인정보처리방침](https://steamsignal.vercel.app/privacy)에 수집·보관·파기 항목을 **시행 전에** 추가해야 한다.
 
-- [ ] **[사람] 메일 발송 서비스 선택 + API 키** — Resend 무료 티어(월 3,000통)면 충분하다
-- [ ] **[코드] 구독 테이블** — `price_alerts(email, appid, target_price, created_at, confirmed_at, unsubscribe_token)`.
-      **더블 옵트인 필수**(확인 메일 전까지 발송 안 함). 모든 메일에 수신거부 링크
-- [ ] **[코드] 가격 하락 감지 크론** — `price_events` 에 새 행이 들어올 때 조건 충족 구독을 찾는다.
-      수집기가 이미 변경점만 기록하므로 새로 만들 로직은 거의 없다
-- [ ] **[코드] 개인정보처리방침 갱신** — 이메일 수집·보관 기간·파기 절차. **발송 시작 전에**
-- [ ] **[코드] 주간 리포트 뉴스레터** — 급상승 TOP 5 + 신규 할인. 위 파이프라인이 서면 얹기만 하면 된다
+**코드는 2026-09-06 에 다 들어갔다.** `RESEND_API_KEY` 와 `MAIL_FROM` 이 등록되는 순간 켜지고,
+없는 동안은 구독 폼도 `/alerts` 도 존재하지 않는다(404). 즉 아래 [사람] 항목 하나가 남은 전부다.
+
+- [ ] **[사람] Resend 가입 + 도메인 인증 + 환경변수 2개 등록** — `RESEND_API_KEY`, `MAIL_FROM`.
+      무료 티어 월 3,000통. **도메인 인증(SPF·DKIM)을 끝내고 넣을 것** — 인증 없이 보내면
+      Gmail 이 스팸함으로 보내고, 그 상태가 며칠 쌓이면 도메인 평판이 회복되지 않는다.
+      넣기 전에 `MAIL_FROM` 의 주소가 실제로 받을 수 있는 주소인지도 확인한다(수신 거부 문의가 여기로 온다)
+- [ ] **[확인] 켠 뒤 첫 발송** — 본인 주소로 신청 → 확인 메일 → `/alerts/confirm` 버튼 → 가격 알림.
+      `mail_deliveries` 에 `status='sent'` 가 남는지 DB 로 확인하는 게 가장 정확하다:
+
+      ```bash
+      node --env-file=.env -e "import('./lib/db.mjs').then(async({getSql})=>{const s=getSql();console.log(await s\`SELECT kind, status, COUNT(*)::int FROM mail_deliveries GROUP BY 1,2\`)})"
+      ```
+- [x] **[코드] 구독 테이블** — `subscribers` / `price_alerts` / `mail_deliveries` 3개.
+      더블 옵트인, 주소별 영구 수신거부 토큰, IP 미저장
+- [x] **[코드] 가격 하락 감지 크론** — `alerts` 잡(30분 간격). `notified_price` 워터마크로
+      같은 할인에 두 번 보내지 않고, 한 사람의 여러 건은 한 통으로 묶는다
+- [x] **[코드] 개인정보처리방침 갱신** — 수집 항목·목적·보관 기간(30/30/90일)·파기·Resend 위탁·해지 방법.
+      메일이 꺼져 있으면 이 항목 자체가 방침에서 사라진다(절 번호도 자동으로 당겨진다)
+- [x] **[코드] 주간 리포트 뉴스레터** — `newsletter` 잡(월요일 09:23 KST). 실을 내용이 없으면 보내지 않는다
 
 ---
 

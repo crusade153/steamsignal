@@ -65,6 +65,7 @@ GitHub Actions (10분마다 curl 1회)
 | `/charts/weekly` | SSR | 7일 평균 동접 순위 |
 | `/genre`, `/genre/<장르>` | SSR | 장르 허브 |
 | `/watchlist` | SSR 껍데기 + JS | 담아 둔 게임의 현재가·평가. localStorage 에만 저장, noindex, `no-store` |
+| `/alerts`, `/alerts/confirm`, `/alerts/unsubscribe` | SSR | 이메일 알림 안내·확인·해지. **메일 설정이 없으면 셋 다 404.** noindex, `no-store` |
 | `/privacy`, `/terms`, `/contact` | SSR | 애드센스 심사에 필요한 고정 문서 |
 | `/ads.txt` | SSR | `ADSENSE_PUBLISHER_ID` 가 있을 때만 200, 없으면 404 |
 | `/sitemap.xml`, `/robots.txt` | SSR / 정적 | 색인 |
@@ -153,6 +154,22 @@ SELECT COUNT(*), MIN(captured_at) FROM player_snapshots;
 ## 5. 설계에서 기억할 것
 
 새 세션이 맥락 없이 고치다 깨뜨리기 쉬운 지점들이다.
+
+### 5-0. 이메일 알림 (2026-09-06 추가, 아직 켜지지 않음)
+
+1. **설정이 없으면 기능 자체가 없다.** `RESEND_API_KEY`·`MAIL_FROM` 둘 다 있어야 켜진다.
+   판정 기준은 `lib/render.mjs` 의 `config.mail` **하나**이고 `mailEnabled()` 도 그걸 읽는다.
+   화면과 발송이 서로 다른 기준으로 켜지면 폼은 보이는데 메일은 안 오는 상태가 만들어진다.
+2. **확인도 해지도 GET 으로 처리하지 않는다.** 메일 클라이언트와 회사 보안 스캐너는 링크를 미리 열어 본다.
+   `/alerts/confirm` 은 버튼만 그리고, 쓰기는 그 버튼이 `/api/alerts` 로 POST 할 때만 일어난다.
+   GET 이 쓰기를 하면 본인이 누르지 않은 구독 확정·해지가 생긴다.
+3. **보내기 전에 `mail_deliveries` 에 자리를 잡는다.** `dedupe_key` 의 UNIQUE 가 중복 판정의 전부다.
+   발송 도중 죽으면 `pending` 으로 남고 재발송하지 않는다 — **중복 발송보다 누락이 낫다.**
+4. **워터마크(`notified_price`)는 발송에 성공한 뒤에만 올린다.** 먼저 올리면 실패한 하락을 영영 못 알린다.
+5. **응답으로 주소의 상태를 알려 주지 않는다.** "이미 가입됨"과 "처음"을 구분해 답하면
+   그 엔드포인트가 주소 존재 확인 도구가 된다. 항상 같은 문구로 답한다.
+6. **개인정보는 이 기능이 유일하다.** 보관 기간(미확인 30일 · 해지 30일 · 발송원장 90일)은
+   `prune_subscriptions()` 와 `/privacy` 양쪽에 적혀 있다. **한쪽만 고치면 방침이 거짓말이 된다.**
 
 ### 5-1. 수집 (기존)
 

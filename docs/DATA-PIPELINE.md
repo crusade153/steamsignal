@@ -36,7 +36,8 @@ GitHub Actions (스케줄러, curl 1회)
 | [db/schema.sql](../db/schema.sql) | 테이블·인덱스 |
 | [db/functions.sql](../db/functions.sql) | 롤업·보관정책 함수 |
 | [lib/db.mjs](../lib/db.mjs) | Neon 클라이언트, 실행 로그 래퍼 |
-| [lib/collect.mjs](../lib/collect.mjs) | 수집 잡 5종 |
+| [lib/collect.mjs](../lib/collect.mjs) | 잡 7종 (수집 5 + 메일 2) |
+| [lib/mail.mjs](../lib/mail.mjs) | Resend 발송 + 메일 템플릿. 설정이 없으면 아무것도 하지 않는다 |
 | [api/cron.js](../api/cron.js) | 크론 엔드포인트 (시크릿 인증) |
 | [scripts/collect.mjs](../scripts/collect.mjs) | CLI (로컬·수동·비상용) |
 
@@ -45,6 +46,7 @@ GitHub Actions (스케줄러, curl 1회)
 | 경로 | 역할 |
 | --- | --- |
 | [lib/queries.mjs](../lib/queries.mjs) | 읽기 전용 쿼리. 여기서 Steam 을 부르는 코드는 없다 |
+| [lib/alerts.mjs](../lib/alerts.mjs) | 구독 SQL. **사용자 요청 경로에서 쓰기를 하는 유일한 파일** |
 | [lib/render.mjs](../lib/render.mjs) | 레이아웃·포맷터·인라인 SVG 차트 |
 | [lib/pages.mjs](../lib/pages.mjs) | 페이지 본문. `{status, headers, body}` 만 돌려주고 HTTP 를 모른다 |
 | [lib/routes.mjs](../lib/routes.mjs) | 라우트 정의 한곳. `vercel.json` 의 rewrites 를 여기서 만든다 |
@@ -90,7 +92,13 @@ GitHub Actions (스케줄러, curl 1회)
 | `details` | 10분 | 40 | 가장 오래 안 본 앱 20개의 가격·리뷰·메타데이터 |
 | `rollup-hourly` | 1시간 | 0 | 최근 3시간 재집계 |
 | `rollup-daily` | 1일 | 0 | 최근 2일 재집계 (KST 기준) |
-| `prune` | 1일 | 0 | 보관정책 적용 |
+| `prune` | 1일 | 0 | 보관정책 적용 (시계열 + 구독 데이터) |
+| `alerts` | 30분 | 0 | 가격 하락 알림 메일. 설정이 없으면 즉시 끝난다 |
+| `newsletter` | 1주 | 0 | 주간 리포트 메일 (월요일 09:23 KST) |
+
+메일 잡 둘은 **Steam 을 부르지 않는다.** 이미 적재된 `app_stats`·`price_events` 만 읽는다.
+한 번에 보내는 통 수는 알림 40통·주간 90통으로 막아 두었다 — Vercel 함수 시간(60초)과
+Resend 일일 한도가 둘 다 걸리기 때문이고, 남은 대상은 다음 실행이 이어서 가져간다.
 
 ### 상세 수집의 라운드로빈 커서
 

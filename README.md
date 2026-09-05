@@ -100,6 +100,13 @@ Vercel 은 이 지시를 CDN 에서 쓰고 클라이언트에는 `public, max-ag
 | `ADSENSE_SLOT_DETAIL` | 게임 상세 하단 슬롯 없음 | 애드센스 슬롯 ID |
 | `CONTACT_EMAIL` | 문의 페이지가 GitHub 이슈만 안내 | 문의 주소 |
 | `VERCEL_WEB_ANALYTICS=1` | 분석 스크립트가 나가지 않음 (기본) | Vercel Web Analytics |
+| `RESEND_API_KEY` + `MAIL_FROM` | 구독 폼이 그려지지 않고 `/alerts` 는 404, 발송 잡은 그냥 끝남 | 이메일 알림 (Resend) |
+
+이메일 알림은 **두 값이 다 있어야** 켜집니다. 하나만 넣으면 꺼진 것과 같습니다 —
+폼은 보이는데 메일은 오지 않는 상태가 가장 나쁘기 때문입니다.
+켜기 전에 Resend 에서 **도메인 인증(SPF·DKIM)을 끝내세요.** 인증 없이 보내면 Gmail 이 스팸함으로 보내고,
+그 상태가 며칠 쌓이면 도메인 평판은 되돌리기 어렵습니다.
+켜는 순간 `/privacy` 에 이메일 수집·보관·파기 항목이 함께 나타납니다(끄면 다시 사라집니다).
 
 Vercel Web Analytics 는 쿠키를 쓰지 않으므로 쿠키 동의 배너가 필요 없습니다.
 **켜는 순서가 중요합니다** — 대시보드 > Analytics > Enable 을 먼저 하고, 그다음 `VERCEL_WEB_ANALYTICS=1` 을 넣습니다.
