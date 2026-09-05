@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { handleApi } from './lib/http.mjs';
+import { handleApi, handleAlerts } from './lib/http.mjs';
 import { matchRoute } from './lib/routes.mjs';
 import { HANDLERS, notFound, serverError, sitemap } from './lib/pages.mjs';
 import { getSql, lazySql } from './lib/db.mjs';
@@ -26,6 +26,9 @@ async function renderPage(req, res, produce) {
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
+  // 배포에서는 파일 하나가 함수 하나다(api/alerts.js). 로컬에서는 여기서 갈라 준다 —
+  // 이 분기가 없으면 구독 신청이 읽기 API 로 흘러가 로컬에서만 404 가 난다.
+  if (url.pathname === '/api/alerts') return handleAlerts(req, res);
   if (url.pathname.startsWith('/api/')) return handleApi(req, res);
   if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405, { Allow: 'GET, HEAD' }); res.end(); return; }
 
@@ -33,7 +36,9 @@ const server = createServer(async (req, res) => {
   const route = matchRoute(url.pathname);
   if (route) {
     const handle = HANDLERS[route.name];
-    return renderPage(req, res, () => (handle ? handle(lazySql(), route.params) : notFound()));
+    // 배포의 api/page.js 와 같은 params 모양을 만든다. 알림 페이지는 토큰을 쿼리로 받는다.
+    const params = { ...route.params, token: url.searchParams.get('token'), state: url.searchParams.get('state') };
+    return renderPage(req, res, () => (handle ? handle(lazySql(), params) : notFound()));
   }
 
   try {

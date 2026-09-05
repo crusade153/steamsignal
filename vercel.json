@@ -57,6 +57,18 @@
       "destination": "/api/page?route=watchlist"
     },
     {
+      "source": "/alerts",
+      "destination": "/api/page?route=alerts"
+    },
+    {
+      "source": "/alerts/confirm",
+      "destination": "/api/page?route=alertsConfirm"
+    },
+    {
+      "source": "/alerts/unsubscribe",
+      "destination": "/api/page?route=alertsUnsubscribe"
+    },
+    {
       "source": "/privacy",
       "destination": "/api/page?route=privacy"
     },
