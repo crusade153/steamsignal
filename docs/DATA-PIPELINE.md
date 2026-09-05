@@ -298,7 +298,8 @@ SELECT job, status, processed, failed, started_at, finished_at, error
 | SSR 페이지·사이트맵·구조화 데이터 | 검증됨 — `node check.mjs --live` |
 | CDN 캐시 적중 | 검증됨 — `X-Vercel-Cache: HIT` |
 | **장시간 누적 동작** (롤업 겹치기, `prune` 의 실제 삭제) | **미검증** — 지울 만큼 쌓이지 않았다 |
-| **급상승의 실제 산출** | **미검증** — 시간 롤업이 몇 시간은 쌓여야 첫 순위가 나온다 |
+| 급상승 쿼리의 실제 산출 | 검증됨 — 창을 좁혀(1h vs 4h) 돌리자 실제 순위가 나왔다 |
+| **기본 창(24h vs 7일)의 산출** | **미검증** — 시간 롤업이 그만큼 쌓여야 한다 |
 
 멱등 키는 배포 검증 중에 실제로 확인됐다. 같은 `capturedAt` 으로 두 번 돌리자
 두 번째 실행이 `snapshots: 0` 을 냈다 — `ON CONFLICT DO NOTHING` 이 의도대로 흡수한 것이다.
