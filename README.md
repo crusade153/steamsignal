@@ -26,10 +26,14 @@ npm run dev
 | --- | --- |
 | `/` | 현재 동접 TOP 100. 검색·정렬·페이지가 URL 에 남습니다 (`/?page=5`, `/?q=Stardew`) |
 | `/game/<appid>-<slug>` | 동접 추이 차트, 역대 최고 동접, 가격과 역대 최저가, 리뷰 추이, 같은 장르 추천 |
+| `/game/<appid>-<slug>/reviews` | 누적 긍정률 vs **최근 신규 리뷰**의 긍정률. Steam 화면에 없는 숫자입니다 |
 | `/rising` | 두 시간대의 평균 동접을 비교한 급상승 순위. **Steam 이 제공하지 않는 우리 콘텐츠** |
 | `/deals` | Steam 긍정률 75% 이상인 할인. 우리 가격 이력으로 역대 최저가 여부를 표시 |
-| `/charts/weekly` | 최근 7일 평균 동접 순위. 하루짜리 이벤트에 흔들리지 않습니다 |
+| `/deals/all-time-low` | 가격 변동을 2회 이상 관측한 게임 중 **지금이 최저가**인 것만 |
+| `/charts/weekly`, `/charts/monthly` | 7일·30일 평균 동접 순위. 하루짜리 이벤트에 흔들리지 않습니다 |
 | `/genre`, `/genre/<장르>` | 장르 허브 |
+| `/genre/<장르>/free`, `/genre/<장르>/discounted` | 장르 조합. 게임 5개 미만이면 만들지 않습니다 |
+| `/releases`, `/releases/<연도>` | 발매 연도별. 그해 게임이 지금도 플레이되는지 |
 | `/watchlist` | 담아 둔 게임의 현재가·할인·평가. **계정 없이 브라우저에만 저장**됩니다 |
 | `/privacy`, `/terms`, `/contact` | 개인정보처리방침 · 이용약관 · 문의 |
 | `/sitemap.xml`, `/robots.txt`, `/ads.txt` | 색인·광고용 |
@@ -63,7 +67,7 @@ lib/render.mjs     공용 레이아웃 · 포맷터 · 인라인 SVG 차트
 lib/pages.mjs      SSR 페이지 본문 (HTTP 를 모른다)
 lib/routes.mjs     라우트 정의 한곳 — vercel.json 의 rewrites 를 여기서 만든다
 lib/http.mjs       읽기 API 핸들러
-lib/collect.mjs    수집 잡 5종 (chart / details / rollup-hourly / rollup-daily / prune)
+lib/collect.mjs    수집 잡 8종 (chart / details / rollup-hourly / rollup-daily / prune / alerts / newsletter / watchdog)
 lib/steam.mjs      Steam 수집·검증·동시성 제한
 lib/db.mjs         Neon 클라이언트, 실행 로그 래퍼
 db/                스키마와 롤업·보관정책 함수
@@ -170,7 +174,7 @@ npm run test:e2e
 TEST_URL=https://steamsignal.vercel.app node check.mjs --live
 ```
 
-이 모드는 SSR 페이지 5종, 구조화 데이터, canonical, 404, sitemap, robots 까지 확인합니다.
+이 모드는 SSR 페이지 9종, 구조화 데이터, canonical, 404, sitemap, robots 까지 확인합니다.
 스크린샷은 `screenshots/` 에 저장됩니다.
 
 ## 배포

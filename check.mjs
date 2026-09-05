@@ -91,7 +91,7 @@ try {
   const ssrChecked = [];
   if (live) {
     const gameHref = await page.locator('#gameRows .game-button').first().getAttribute('href');
-    for (const path of [gameHref, '/rising', '/deals', '/charts/weekly', '/genre']) {
+    for (const path of [gameHref, `${gameHref}/reviews`, '/rising', '/deals', '/deals/all-time-low', '/charts/weekly', '/charts/monthly', '/genre', '/releases']) {
       const response = await page.goto(origin + path, { waitUntil: 'domcontentloaded' });
       assert.equal(response.status(), 200, `${path} returned ${response.status()}`);
       assert.equal(await page.locator('h1').count(), 1, `${path} must have exactly one h1`);

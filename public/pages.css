@@ -10,6 +10,9 @@
 .page-intro h1{font-size:clamp(27px,3vw,38px);line-height:1.32;letter-spacing:-1.5px;font-weight:730;margin:12px 0 12px}
 .page-intro p{font-size:14px;color:var(--muted);line-height:1.85}
 .page-intro strong{color:var(--text);font-weight:650}
+/* 관련 페이지로 건너뛰는 링크 줄. 목록 페이지끼리 서로를 가리켜야 크롤러가 안쪽까지 들어온다. */
+.page-links{display:flex;flex-wrap:wrap;gap:9px;margin-top:18px}
+.page-links .button{font-size:13px;padding:7px 13px}
 
 .panel{margin:0 0 26px}
 .panel .section-heading{margin-bottom:14px}

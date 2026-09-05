@@ -29,12 +29,20 @@
   ],
   "rewrites": [
     {
+      "source": "/game/:slug/reviews",
+      "destination": "/api/page?route=gameReviews&slug=:slug"
+    },
+    {
       "source": "/game/:slug",
       "destination": "/api/page?route=game&slug=:slug"
     },
     {
       "source": "/rising",
       "destination": "/api/page?route=rising"
+    },
+    {
+      "source": "/deals/all-time-low",
+      "destination": "/api/page?route=dealsLow"
     },
     {
       "source": "/deals",
@@ -45,12 +53,32 @@
       "destination": "/api/page?route=weekly"
     },
     {
+      "source": "/charts/monthly",
+      "destination": "/api/page?route=monthly"
+    },
+    {
       "source": "/genre",
       "destination": "/api/page?route=genres"
     },
     {
+      "source": "/genre/:genre/free",
+      "destination": "/api/page?route=genreFree&genre=:genre"
+    },
+    {
+      "source": "/genre/:genre/discounted",
+      "destination": "/api/page?route=genreDiscounted&genre=:genre"
+    },
+    {
       "source": "/genre/:genre",
       "destination": "/api/page?route=genre&genre=:genre"
+    },
+    {
+      "source": "/releases",
+      "destination": "/api/page?route=releases"
+    },
+    {
+      "source": "/releases/:year",
+      "destination": "/api/page?route=release&year=:year"
     },
     {
       "source": "/watchlist",

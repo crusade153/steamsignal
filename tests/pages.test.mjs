@@ -5,7 +5,11 @@ import { execFileSync } from 'node:child_process';
 
 import { ROUTES, rewrites, matchRoute, decodeParam } from '../lib/routes.mjs';
 import { esc, escXml, lineChart, formatDay, won, gameCell, gamePath, safeImage, layout, adSlot } from '../lib/render.mjs';
-import { parseGameSlug, gamePage, risingPage, sitemap, RISING_WINDOWS } from '../lib/pages.mjs';
+import {
+  parseGameSlug, gamePage, gameReviewsPage, reviewDeltas, risingPage, sitemap, genrePage,
+  monthlyPage, dealsLowPage, genreFreePage, genreDiscountedPage, releasePage,
+  RISING_WINDOWS, MIN_COMBO_GAMES
+} from '../lib/pages.mjs';
 import { serializeGame } from '../lib/http.mjs';
 import { LEGAL_HANDLERS } from '../lib/legal.mjs';
 
@@ -48,13 +52,24 @@ test('vercel.json 의 rewrites 가 lib/routes.mjs 와 정확히 일치한다', a
 
 test('matchRoute 는 모든 라우트를 잡고 끝 슬래시를 같은 페이지로 본다', () => {
   for (const route of ROUTES) {
-    const path = route.source.replace(':slug', '730-cs2').replace(':genre', '액션');
+    const path = route.source.replace(':slug', '730-cs2').replace(':genre', '액션').replace(':year', '2024');
     assert.equal(matchRoute(path)?.name, route.name, `${route.source} 가 매칭되지 않았다`);
   }
   assert.equal(matchRoute('/rising/')?.name, 'rising');
   assert.equal(matchRoute('/game/730-cs2/')?.name, 'game');
   assert.equal(matchRoute('/game/730/extra'), null);
   assert.equal(matchRoute('/nope'), null);
+
+  // 하위 경로가 상위 라우트에 먹히면 /game/730/reviews 가 게임 상세로 떨어져
+  // '730/reviews' 를 슬러그로 읽고 404 를 낸다. 배포에서만 보이는 종류의 사고다.
+  assert.equal(matchRoute('/game/730-cs2/reviews')?.name, 'gameReviews');
+  assert.equal(matchRoute('/genre/액션/free')?.name, 'genreFree');
+  assert.equal(matchRoute('/genre/액션/discounted')?.name, 'genreDiscounted');
+  assert.equal(matchRoute('/deals/all-time-low')?.name, 'dealsLow');
+  assert.equal(matchRoute('/releases/2024')?.name, 'release');
+  // 연도가 아닌 값은 라우트 단계에서 막는다 — 안 그러면 크롤러가 URL 을 무한히 만들어 낸다.
+  assert.equal(matchRoute('/releases/abcd'), null);
+  assert.equal(matchRoute('/releases/24'), null);
 });
 
 test('decodeParam 은 이미 디코딩된 값에 아무 일도 하지 않는다', () => {
@@ -231,6 +246,145 @@ test('급상승은 비교할 구간이 없으면 빈 순위를 지어내지 않�
   assert.ok(!body.includes('<tbody>'));
 });
 
+// --- 리뷰 추이 ---------------------------------------------------------------
+
+test('리뷰 차분은 음수를 만들지 않고 빠진 날을 지어내지 않는다', () => {
+  // Steam 은 이미 쓴 리뷰를 지울 수 있다. 그대로 빼면 "신규 리뷰 -12개" 가 화면에 나간다.
+  const deltas = reviewDeltas([
+    { day: '2026-09-01', total_positive: 100, total_negative: 10 },
+    { day: '2026-09-02', total_positive: 120, total_negative: 12 },
+    // 하루 걸렀다 — 없는 날을 0 으로 채우지 않고 구간이 넓어질 뿐이다.
+    { day: '2026-09-04', total_positive: 110, total_negative: 20 }
+  ]);
+  assert.equal(deltas.length, 2);
+  assert.deepEqual(
+    { positive: deltas[0].positive, negative: deltas[0].negative, ratio: deltas[0].ratio },
+    { positive: 20, negative: 2, ratio: 91 }
+  );
+  assert.equal(deltas[1].positive, 0, '리뷰가 지워져도 음수가 되지 않는다');
+  assert.equal(deltas[1].from, '2026-09-02', '빠진 날은 앞 기록까지의 구간이 된다');
+  assert.equal(deltas[1].negative, 8);
+});
+
+test('리뷰 추이는 표본이 얇으면 색인되지 않는다', async () => {
+  const one = fakeSql({
+    'FROM apps a LEFT JOIN app_stats': [app],
+    'FROM review_daily': [{ day: '2026-09-05', total_positive: 100, total_negative: 10 }]
+  });
+  const thin = await gameReviewsPage(one, { slug: '730-counter-strike-2' });
+  assert.equal(thin.status, 200, '데이터가 얇다고 404 를 내면 나중에 쌓여도 그 404 가 남는다');
+  assert.ok(thin.body.includes('name="robots" content="noindex'));
+  assert.ok(thin.body.includes('아직 비교할 구간이 없습니다'));
+
+  const days = Array.from({ length: 5 }, (_, i) => ({
+    day: `2026-09-0${i + 1}`, total_positive: 100 + i * 30, total_negative: 10 + i
+  }));
+  const rich = await gameReviewsPage(fakeSql({
+    'FROM apps a LEFT JOIN app_stats': [app],
+    'FROM review_daily': days
+  }), { slug: '730-counter-strike-2' });
+  assert.ok(!rich.body.includes('name="robots"'), '표본이 쌓이면 색인 대상이다');
+  assert.ok(rich.body.includes('rel="canonical" href="http://127.0.0.1:5174/game/730-counter-strike-2/reviews"'));
+});
+
+test('리뷰 추이도 정규 슬러그로 301 한다', async () => {
+  const sql = fakeSql({ 'FROM apps a LEFT JOIN app_stats': [app] });
+  const moved = await gameReviewsPage(sql, { slug: '730' });
+  assert.equal(moved.status, 301);
+  assert.equal(moved.headers.Location, '/game/730-counter-strike-2/reviews');
+});
+
+// --- 파생 목록 ---------------------------------------------------------------
+
+test('월간 차트는 30일 창을 쓰고 주간과 다른 주소를 갖는다', async () => {
+  const rows = [{
+    appid: 730, title: 'CS2', slug: '730-cs2', header_image: null, genres: [],
+    avg_players: 800_000, peak_players: 1_000_000, best_rank: 1, days: 30, samples: 4000,
+    positive_ratio: 86, current_rank: 1, current_players: 900_000
+  }];
+  const { body } = await monthlyPage(fakeSql({ 'FROM player_daily': rows }));
+  assert.ok(body.includes('rel="canonical" href="http://127.0.0.1:5174/charts/monthly"'));
+  assert.ok(body.includes('월간 평균 동접'));
+  assert.ok(body.includes('href="/charts/weekly"'), '두 차트는 서로를 가리켜야 한다');
+});
+
+test('역대 최저가는 판정 근거와 한계를 함께 적는다', async () => {
+  const rows = [{
+    appid: 730, title: 'CS2', slug: '730-cs2', header_image: null, genres: [], metacritic_score: null,
+    final_price: 1_000_000, initial_price: 2_000_000, discount_percent: 50, price_formatted: '₩10,000',
+    positive_ratio: 86, total_positive: 100, total_negative: 10, players: 1000, rank: 1,
+    lowest_price: 1_000_000, observations: 4, first_seen: '2026-08-01T00:00:00.000Z'
+  }];
+  const { body } = await dealsLowPage(fakeSql({ 'FROM app_stats s JOIN apps a USING (appid) JOIN lows': rows }));
+  assert.ok(body.includes('역대 최저가'));
+  assert.ok(body.includes('기록을 시작한 이후'), '"역대" 의 범위를 밝혀야 한다');
+
+  const empty = await dealsLowPage(fakeSql());
+  assert.equal(empty.status, 200);
+  assert.ok(empty.body.includes('아직 역대 최저가로 판정할 게임이 없습니다'));
+});
+
+test('조합 페이지는 게임이 적으면 만들지 않는다', async () => {
+  const make = n => Array.from({ length: n }, (_, i) => ({
+    appid: i + 1, title: `게임 ${i}`, slug: `${i + 1}-g`, header_image: null, genres: ['액션'],
+    metacritic_score: null, players: 100, positive_ratio: 90, total_positive: 90, total_negative: 10,
+    final_price: 0, discount_percent: 0, is_free: true
+  }));
+
+  const thin = await genreFreePage(fakeSql({ 'is_free IS TRUE': make(MIN_COMBO_GAMES - 1) }), { genre: '액션' });
+  assert.equal(thin.status, 404, '얇은 조합 페이지는 색인에 손해다');
+
+  const ok = await genreFreePage(fakeSql({ 'is_free IS TRUE': make(MIN_COMBO_GAMES) }), { genre: '액션' });
+  assert.equal(ok.status, 200);
+  assert.ok(ok.body.includes('rel="canonical" href="http://127.0.0.1:5174/genre/%EC%95%A1%EC%85%98/free"'));
+
+  const sale = await genreDiscountedPage(fakeSql({ 's.discount_percent > 0': make(MIN_COMBO_GAMES) }), { genre: '액션' });
+  assert.equal(sale.status, 200);
+  assert.ok(sale.body.includes('할인 중인 액션 게임'));
+});
+
+test('장르 페이지는 실제로 열리는 조합만 링크한다', async () => {
+  // 링크와 페이지의 판정 기준이 다르면 "눌렀더니 404" 가 생긴다.
+  const rows = Array.from({ length: 6 }, (_, i) => ({
+    appid: i + 1, title: `게임 ${i}`, slug: `${i + 1}-g`, header_image: null, genres: ['액션'],
+    metacritic_score: null, players: 100, positive_ratio: 90, total_positive: 90, total_negative: 10,
+    // 무료는 6개(기준 충족), 할인은 1개(기준 미달)
+    final_price: 0, discount_percent: i === 0 ? 30 : 0, is_free: true
+  }));
+  const { body } = await genrePage(fakeSql({ 'a.genres @> ARRAY': rows }), { genre: '액션' });
+  assert.ok(body.includes('/free">무료 6개'));
+  assert.ok(!body.includes('/discounted"'), '기준에 못 미치는 조합은 링크하지 않는다');
+});
+
+test('목록이 상한에 닿으면 링크에 개수를 적지 않는다', async () => {
+  // 개수는 받아 온 60개 안에서 센 값이다. 장르에 게임이 61개 있으면 실제보다 적게 나온다.
+  // 틀린 숫자를 적느니 안 적는다.
+  const many = Array.from({ length: 60 }, (_, i) => ({
+    appid: i + 1, title: `게임 ${i}`, slug: `${i + 1}-g`, header_image: null, genres: ['액션'],
+    metacritic_score: null, players: 100, positive_ratio: 90, total_positive: 90, total_negative: 10,
+    final_price: 0, discount_percent: 0, is_free: true
+  }));
+  const { body } = await genrePage(fakeSql({ 'a.genres @> ARRAY': many }), { genre: '액션' });
+  assert.ok(body.includes('/free">무료</a>'), '상한에 닿으면 숫자를 뺀다');
+  assert.ok(!/무료 \d+개/.test(body));
+});
+
+test('발매 연도는 네 자리 숫자만 받는다', async () => {
+  const rows = [{
+    appid: 730, title: 'CS2', slug: '730-cs2', header_image: null, genres: [], metacritic_score: null,
+    release_date: '2012-08-21', players: 900_000, positive_ratio: 86,
+    total_positive: 100, total_negative: 10, final_price: 0, discount_percent: 0
+  }];
+  const sql = fakeSql({ 'EXTRACT(YEAR FROM a.release_date)': rows });
+  const { status, body } = await releasePage(sql, { year: '2012' });
+  assert.equal(status, 200);
+  assert.ok(body.includes('2012년에 나온 게임'));
+  assert.ok(body.includes('2012년 8월 21일'), '발매일은 시간대를 타지 않는 문자열이어야 한다');
+
+  assert.equal((await releasePage(sql, { year: 'abcd' })).status, 404);
+  assert.equal((await releasePage(sql, { year: '1200' })).status, 404);
+});
+
 // --- 사이트맵 ---------------------------------------------------------------
 
 test('사이트맵은 정적 경로·장르·게임을 모두 담고 XML 로 이스케이프한다', async () => {
@@ -240,7 +394,7 @@ test('사이트맵은 정적 경로·장르·게임을 모두 담고 XML 로 이
   });
   const { body, headers } = await sitemap(sql);
   assert.match(headers['Content-Type'], /application\/xml/);
-  for (const path of ['/rising', '/deals', '/charts/weekly', '/genre']) {
+  for (const path of ['/rising', '/deals', '/deals/all-time-low', '/charts/weekly', '/charts/monthly', '/genre', '/releases']) {
     assert.ok(body.includes(`${path}</loc>`), `${path} 가 사이트맵에 없다`);
   }
   assert.ok(body.includes('/genre/%EC%95%A1%EC%85%98</loc>'));

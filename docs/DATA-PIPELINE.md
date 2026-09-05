@@ -258,6 +258,23 @@ SELECT a.appid, a.title, a.slug, recent.players AS now_players, past.players AS 
  LIMIT 20;
 ```
 
+### 파생 페이지 쿼리
+
+`/game/:slug/reviews` · `/charts/monthly` · `/deals/all-time-low` · `/genre/:g/free` ·
+`/genre/:g/discounted` · `/releases/:year` 가 쓰는 쿼리는 전부 `lib/queries.mjs` 에 있다.
+여기에 전문을 옮겨 적지 않는다 — 두 곳에 적으면 반드시 어긋난다. 대신 판정 규칙만 적어 둔다.
+
+- **역대 최저가**(`allTimeLows`) — `price_events` 에서 가격 변경을 **2회 이상** 본 앱만 판정한다.
+  1회만 본 앱은 그 값이 자동으로 최저가라 "언제나 참"이 되어 아무것도 알려 주지 못한다.
+- **장르 조합**(`genreFreeGames` / `genreDiscountedGames`) — 게임이 `MIN_COMBO_GAMES`(5) 미만이면
+  페이지를 만들지 않는다. 링크·페이지·사이트맵이 이 상수 하나를 공유한다.
+- **무료 판정** — `apps.is_free IS TRUE` 이거나 `app_stats.final_price = 0`.
+  `is_free` 가 NULL 인(상세 미수집) 앱은 값이 0원이어도 넣지 않는다.
+- **발매 연도**(`releaseYears`) — `apps.release_date` 가 NULL 인 앱은 자동으로 빠진다.
+  원문(`release_date_text`)으로 억지 추정하지 않는다.
+- **리뷰 추이**(`reviewSeries`) — 하루 1행이라 180일을 다 꺼내도 400행 이하다.
+  차분은 화면단(`reviewDeltas()`)에서 하고, 빠진 날을 0 으로 채우지 않는다.
+
 ### 최근 30일 신규 리뷰 긍정률
 
 누적값의 차분이다. Steam 이 리뷰를 삭제하면 음수가 될 수 있어 `GREATEST` 로 막는다.
@@ -282,12 +299,24 @@ SELECT job, status, processed, failed, started_at, finished_at, error
  LIMIT 20;
 ```
 
-경보를 걸 만한 조건:
+경보 조건은 **`watchdog` 잡이 자동으로 본다**(2시간 간격). 임계값은
+`lib/collect.mjs` 의 `HEALTH_LIMITS` 하나에 모여 있고, 판정은 순수 함수 `evaluateHealth()` 가 한다.
 
-- `chart` 잡이 30분 이상 `ok` 를 못 냈다 → Steam 차트 API 또는 스케줄러 문제
-- `details` 의 `failed` 가 `processed` 를 넘는다 → IP 차단 또는 스토어 API 변경
-- `details_failures >= 5` 인 앱이 급증한다 → 위와 같음
-- `player_snapshots` 의 `MAX(captured_at)` 이 20분 이상 안 움직인다 → 파이프라인 정지
+| 조건 | 임계값 | 뜻 |
+| --- | --- | --- |
+| `player_snapshots` 의 `MAX(captured_at)` 이 멈춤 | 25분 | 파이프라인 정지 (한 사이클 지연은 정상) |
+| `chart` 잡이 `ok` 를 못 냄 | 30분 | Steam 차트 API 또는 스케줄러 문제 |
+| `details` 의 `failed` 가 `processed` 만큼 많음 | 최근 6시간 합계 | IP 차단 또는 스토어 API 변경 |
+| `details_failures >= 5` 인 앱 수 | 20개 | 위와 같음 |
+
+**통보 방법이 특이하다. 경보가 걸리면 잡이 일부러 예외를 던진다.**
+`withRun` 이 `collector_runs` 에 `error` 로 남기고 → `/api/cron` 이 500 을 내고 →
+GitHub Actions 의 `curl` 이 실패해 워크플로가 빨개지고 → GitHub 이 저장소 소유자에게 메일을 보낸다.
+Slack·Resend 없이 **설정 0개로** 도는 경보 경로가 이것뿐이라 이렇게 했다.
+나중에 Slack 웹훅을 붙이려면 `evaluateHealth()` 의 반환값을 던지는 대신 보내면 된다 —
+판정과 통보는 이미 분리돼 있다.
+
+감시 자체는 **아무것도 쓰지 않는다.** 읽기 5개를 한 쿼리로 묶어 왕복 1회다.
 
 ---
 
@@ -308,6 +337,8 @@ SELECT job, status, processed, failed, started_at, finished_at, error
 | **장시간 누적 동작** (롤업 겹치기, `prune` 의 실제 삭제) | **미검증** — 지울 만큼 쌓이지 않았다 |
 | 급상승 쿼리의 실제 산출 | 검증됨 — 창을 좁혀(1h vs 4h) 돌리자 실제 순위가 나왔다 |
 | **기본 창(24h vs 7일)의 산출** | **미검증** — 시간 롤업이 그만큼 쌓여야 한다 |
+| 파이프라인 감시 (`watchdog`) | 검증됨 — 실제 DB 에서 스냅샷 지연을 잡아냈다 (2026-09-06) |
+| 파생 페이지 6종 (리뷰 추이·월간·역대 최저가·장르 조합·발매 연도) | 로컬 DB 로 검증됨 — 200/404/301 |
 
 멱등 키는 배포 검증 중에 실제로 확인됐다. 같은 `capturedAt` 으로 두 번 돌리자
 두 번째 실행이 `snapshots: 0` 을 냈다 — `ON CONFLICT DO NOTHING` 이 의도대로 흡수한 것이다.

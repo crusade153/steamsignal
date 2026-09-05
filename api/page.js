@@ -13,6 +13,7 @@ import { decodeParam } from '../lib/routes.mjs';
 export const pageParams = url => ({
   slug: decodeParam(url.searchParams.get('slug')),
   genre: decodeParam(url.searchParams.get('genre')),
+  year: decodeParam(url.searchParams.get('year')),
   token: url.searchParams.get('token'),
   state: url.searchParams.get('state')
 });

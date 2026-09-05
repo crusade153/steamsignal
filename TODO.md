@@ -10,17 +10,34 @@
 
 ## 0. 지금 당장 — 이게 안 되면 나머지가 다 무의미하다
 
-- [ ] **[확인] 스케줄러가 실제로 도는지 본다.**
-      `*/10` 으로는 자동 발화가 한 번도 안 떠서 `3,13,23,33,43,53` 으로 바꿨다(2026-09-05).
-      워크플로 실행 목록이 아니라 **DB 로** 확인하는 게 정확하다.
+- [ ] **[사람] 스케줄러를 외부 크론으로 옮긴다. GitHub 스케줄은 이 용도로 못 쓴다.**
+
+      2026-09-06 확인 결과 **아직도 10분 간격이 안 지켜진다.** `3,13,23,33,43,53` 으로 어긋나게
+      바꾼 뒤에도 마찬가지다. DB 가 말해 주는 사실:
+
+      | 관측 | 값 |
+      | --- | --- |
+      | `player_snapshots` 의 서로 다른 `captured_at` | **5개** (10분 간격이면 하루 144개여야 한다) |
+      | 마지막 스냅샷 이후 경과 | 98분 |
+      | 그중 대부분 | 수동 실행(`workflow_dispatch`)으로 들어온 것 |
+
+      [HANDOFF §3-1](HANDOFF.md) 의 대안 순서에서 1·2번(지연 대기, 어긋난 분)은 **이미 다 썼다.**
+      남은 것은 3번이다 — **cron-job.org 또는 Upstash QStash**. 둘 다 무료 티어가 있고
+      `/api/cron?jobs=...` 을 `Authorization: Bearer $CRON_SECRET` 로 부르기만 하면 되므로
+      **코드 변경이 전혀 없다.** `.github/workflows/collect.yml` 의 스케줄 5줄을 그대로 옮기면 된다.
+
+      **이게 안 돌면 추이·급상승·주간/월간 차트·리뷰 추이·역대 최저가가 영원히 빈 페이지다.**
+      새로 만든 페이지들이 전부 이 하나에 걸려 있다.
+
+- [x] **[코드] 파이프라인 감시** — `watchdog` 잡(2시간 간격). 스냅샷 지연·chart 실패·상세 실패율·
+      죽은 앱 수를 보고 하나라도 걸리면 **일부러 실패한다.** 워크플로가 빨개지고 GitHub 이
+      소유자에게 메일을 보내므로 **설정이 필요 없는 경보**다. 조건은
+      [docs/DATA-PIPELINE.md §7](docs/DATA-PIPELINE.md) 과 `HEALTH_LIMITS` 에 있다.
+      수동 확인은 이걸로 한다:
 
       ```bash
-      node --env-file=.env -e "import('./lib/db.mjs').then(async({getSql})=>{const s=getSql();console.log(await s\`SELECT MAX(captured_at) AS latest, COUNT(*)::int AS rows FROM player_snapshots\`)})"
+      node --env-file=.env -e "import('./lib/collect.mjs').then(async({createCollector})=>{const{getSql}=await import('./lib/db.mjs');try{console.log(await createCollector({sql:getSql()}).run('watchdog'))}catch(e){console.log('ALERT:',e.message)}})"
       ```
-
-      최신 `captured_at` 이 20분 안쪽이면 정상이다. 여전히 안 움직이면 → [HANDOFF §3-1](HANDOFF.md)
-      의 대안 순서(어긋난 분 → cron-job.org / Upstash → Vercel Pro cron)를 따른다.
-      **이게 안 돌면 추이·급상승·주간 차트가 영원히 빈 페이지다.**
 
 ---
 
@@ -97,15 +114,20 @@
 
 ## 5. 콘텐츠 — URL 을 더 늘린다
 
-지금 123개다. 검색 유입은 URL 개수에 거의 비례한다.
+사이트맵 URL 이 123개 → **160개**가 됐다(2026-09-06). 리뷰 추이 페이지는 아직 0개다 —
+`review_daily` 가 3일 이상 쌓인 게임만 싣기 때문이고, 그건 §0 이 풀려야 쌓인다.
 
-- [ ] **[코드] `/game/<appid>/reviews`** — 리뷰 추이 전용 페이지. 누적 긍정률과 최근 30일 신규 리뷰 긍정률의
-      차이가 큰 게임은 그 자체로 이야기가 된다("예전엔 좋았는데 지금은…")
-- [ ] **[코드] `/charts/monthly`** — 30일 평균. `player_daily` 만 있으면 되므로 `/charts/weekly` 복사 수준
-- [ ] **[코드] `/deals/all-time-low`** — 역대 최저가만 모은 페이지. 어필리에이트 전환율이 가장 높은 종류다
-- [ ] **[코드] `/genre/<장르>/free`, `/genre/<장르>/discounted`** — 조합 페이지.
-      단, **내용이 얇은 조합은 만들지 않는다.** 게임이 5개 미만이면 색인에 손해다
-- [ ] **[코드] 발매일 기반 `/releases/<연도>`** — `apps.release_date` 가 이미 파싱돼 있다
+- [x] **[코드] `/game/<appid>/reviews`** — 누적 긍정률과 최근 신규 리뷰 긍정률의 차이를 보여 준다.
+      차분 표본이 2구간 미만이면 `noindex`(404 가 아니다 — 나중에 쌓여도 그 404 가 남는다).
+      게임 상세에서의 링크도 볼 게 있을 때만 걸린다
+- [x] **[코드] `/charts/monthly`** — 30일 평균. `/charts/weekly` 와 정의를 공유한다(`CHART_VIEWS`)
+- [x] **[코드] `/deals/all-time-low`** — 가격 변동을 **두 번 이상** 관측한 게임만 판정한다.
+      한 번만 본 가격은 자동으로 최저가가 되어 아무것도 알려 주지 못한다
+- [x] **[코드] `/genre/<장르>/free`, `/genre/<장르>/discounted`** — 게임 5개 미만(`MIN_COMBO_GAMES`)이면
+      만들지 않는다. 링크·페이지·사이트맵이 **같은 기준**을 쓰므로 "눌렀더니 404" 가 안 생긴다
+- [x] **[코드] `/releases/<연도>`** + `/releases` 허브 — `apps.release_date` 기반. 연도는 네 자리 숫자만 받는다
+- [ ] **[코드] 다음 후보** — `/charts/peak`(역대 최고 동접 순위)는 `player_daily.peak_reported` 만으로
+      만들 수 있다. 다만 **§0 이 풀린 뒤에** 손댈 것. 지금은 어떤 페이지를 더 만들어도 표본이 없다
 
 ---
 
@@ -118,18 +140,22 @@
 - [ ] **[코드] 링크에 `rel="sponsored"`** — 안 붙이면 검색 품질 가이드라인 위반이다
 - [ ] **[코드] 어필리에이트 고지 문구** — `/terms` 와 해당 페이지에. 법적 요구이자 신뢰의 문제다
 
+> 아래 두 [코드] 항목은 **[사람] 항목 뒤에** 한다. 지금은 어필리에이트 링크가 하나도 없어서,
+> 고지 문구를 먼저 넣으면 있지도 않은 제휴 관계를 적는 것이 된다 — 그건 고지가 아니라 거짓말이다.
+> 프로그램에 가입하고 링크 형식(태그 파라미터)이 정해지면 그때 둘을 함께 넣는다.
+
 ---
 
 ## 7. 운영 — 지금은 없어도 되지만 트래픽이 붙으면 필요하다
 
-- [ ] **[코드] 수집 실패 알림** — `collector_runs` 를 보는 사람이 없으면 조용히 썩는다.
-      경보 조건은 [docs/DATA-PIPELINE.md §7](docs/DATA-PIPELINE.md) 에 이미 정리돼 있다.
-      크론 하나가 조건을 확인해 Slack/메일로 던지면 된다
+- [x] **[코드] 수집 실패 알림** — `watchdog` 잡. §0 참고. Slack·Resend 없이 GitHub 워크플로 실패를
+      경보 채널로 쓴다. 나중에 Slack 을 붙이고 싶으면 `evaluateHealth()` 의 반환값을 던지는 대신
+      웹훅으로 보내면 된다 — 판정과 통보가 이미 분리돼 있다
 - [ ] **[코드] `/api/cron` 레이트리밋** — 지금은 시크릿만으로 막고 있다
 - [ ] **[사람] Neon 백업 확인** — 무료 티어의 PITR 보존 기간을 확인하고, 부족하면
       `player_daily`(영구 보존분)만이라도 주기적으로 덤프한다. **이 테이블이 이 사이트의 자산 전부다**
 - [ ] **[코드] Sentry 또는 Vercel 로그 드레인**
-- [ ] **[코드] `ci.yml` 의 Node 24 와 로컬 22.18.0 맞추기**
+- [x] **[코드] `ci.yml` 의 Node 를 22 로 맞추고 `package.json` 에 `engines` 를 박았다** — 로컬·CI·Vercel 이 같은 메이저를 쓴다
 
 ---
 

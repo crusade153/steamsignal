@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCollector, slugify, parseReleaseDate } from '../lib/collect.mjs';
+import { createCollector, slugify, parseReleaseDate, evaluateHealth, HEALTH_LIMITS } from '../lib/collect.mjs';
 
 // 태그드 템플릿 sql 을 흉내내어 실제 DB 없이 적재 로직(페이로드 모양, 커서 전진, 덮어쓰기 방지)을 검증한다.
 function fakeSql({ targets = [], snapshots = [] } = {}) {
@@ -112,4 +112,76 @@ test('슬러그와 발매일 파서는 한글·결측을 안전하게 다룬다'
 test('알 수 없는 잡은 즉시 거부한다', async () => {
   const collector = createCollector({ sql: fakeSql(), steam: { getChart: async () => chart } });
   assert.throws(() => collector.run('nope'), /알 수 없는 잡/);
+});
+
+// --- 파이프라인 감시 ---------------------------------------------------------
+
+test('감시 잡은 멀쩡할 때 조용하고, 멈추면 무엇이 멈췄는지 말한다', () => {
+  const now = Date.parse('2026-09-06T12:00:00.000Z');
+  const fresh = {
+    latest_snapshot: '2026-09-06T11:53:00.000Z',
+    last_chart_ok: '2026-09-06T11:53:10.000Z',
+    detail_processed: 240, detail_failed: 3, dead_apps: 4
+  };
+  assert.deepEqual(evaluateHealth(fresh, now), [], '정상일 때 경보를 지어내지 않는다');
+
+  // 한 번 밀리는 것은 정상이다(GitHub 스케줄은 정확하지 않다). 두 번 연속 빠지면 사고다.
+  assert.deepEqual(evaluateHealth({ ...fresh, latest_snapshot: '2026-09-06T11:38:00.000Z' }, now), [],
+    '한 사이클 지연으로는 깨우지 않는다');
+
+  const stale = evaluateHealth({ ...fresh, latest_snapshot: '2026-09-06T10:00:00.000Z' }, now);
+  assert.equal(stale.length, 1);
+  assert.match(stale[0], /120분째 멈춰/);
+});
+
+test('감시 잡은 우리 쪽 문제와 개별 게임 실패를 구분한다', () => {
+  const now = Date.parse('2026-09-06T12:00:00.000Z');
+  const base = {
+    latest_snapshot: '2026-09-06T11:53:00.000Z',
+    last_chart_ok: '2026-09-06T11:53:10.000Z',
+    detail_processed: 240, detail_failed: 0, dead_apps: 0
+  };
+  // 죽은 게임 몇 개가 실패하는 것은 늘 있는 일이다.
+  assert.deepEqual(evaluateHealth({ ...base, detail_failed: 12 }, now), []);
+  // 실패가 성공만큼 많으면 IP 차단이나 API 변경이다.
+  assert.match(evaluateHealth({ ...base, detail_processed: 20, detail_failed: 20 }, now)[0], /IP 차단/);
+  assert.match(evaluateHealth({ ...base, dead_apps: HEALTH_LIMITS.deadApps + 1 }, now)[0], /큐에서 빠진 앱/);
+});
+
+test('기록이 하나도 없으면 정상으로 보지 않는다', () => {
+  // NULL 을 "오래되지 않았다"로 읽으면 한 번도 성공한 적 없는 파이프라인이 건강해 보인다.
+  const alerts = evaluateHealth({ latest_snapshot: null, last_chart_ok: null, detail_processed: 0, detail_failed: 0, dead_apps: 0 });
+  assert.equal(alerts.length, 2);
+  assert.match(alerts.join(' '), /하나도 없습니다/);
+});
+
+test('감시 잡은 경보가 있으면 던진다 — 워크플로가 빨개지는 것이 경보다', async () => {
+  const sql = (strings) => {
+    const text = strings.join(' ? ');
+    if (text.startsWith('INSERT INTO collector_runs')) return Promise.resolve([{ id: 1 }]);
+    if (text.includes('latest_snapshot')) return Promise.resolve([{
+      latest_snapshot: null, last_chart_ok: null, detail_processed: 0, detail_failed: 0, dead_apps: 0
+    }]);
+    return Promise.resolve([]);
+  };
+  const collector = createCollector({ sql, steam: { getChart: async () => [] } });
+  await assert.rejects(collector.run('watchdog'), /파이프라인 경보/);
+});
+
+test('감시 잡은 아무것도 쓰지 않는다', async () => {
+  const writes = [];
+  const sql = (strings) => {
+    const text = strings.join(' ? ').trim();
+    if (text.startsWith('INSERT INTO collector_runs') || text.startsWith('UPDATE collector_runs')) return Promise.resolve([{ id: 1 }]);
+    if (/^(INSERT|UPDATE|DELETE)/i.test(text)) writes.push(text);
+    if (text.includes('latest_snapshot')) return Promise.resolve([{
+      latest_snapshot: new Date().toISOString(), last_chart_ok: new Date().toISOString(),
+      detail_processed: 100, detail_failed: 0, dead_apps: 0
+    }]);
+    return Promise.resolve([]);
+  };
+  const collector = createCollector({ sql, steam: { getChart: async () => [] } });
+  const result = await collector.run('watchdog');
+  assert.equal(result.healthy, true);
+  assert.deepEqual(writes, [], '감시는 읽기만 한다');
 });

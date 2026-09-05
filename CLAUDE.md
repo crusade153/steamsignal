@@ -42,7 +42,7 @@ GitHub Actions(10분마다 curl 1회) → /api/cron → lib/collect.mjs → Stea
 **읽기 경로의 층은 서로를 모른다.**
 `lib/routes.mjs`(경로 정의) → `lib/pages.mjs`(본문, `{status, headers, body}` 만 반환하고 HTTP 를 모름)
 → `lib/queries.mjs`(읽기 전용 SQL) / `lib/render.mjs`(레이아웃·포맷터·인라인 SVG 차트, DB 도 Steam 도 모름).
-법적 고정 문서는 `lib/legal.mjs`. 수집은 `lib/collect.mjs`(잡 7종) + `lib/steam.mjs`(수집·검증·동시성) + `lib/db.mjs`.
+법적 고정 문서는 `lib/legal.mjs`. 수집은 `lib/collect.mjs`(잡 8종, `watchdog` 포함) + `lib/steam.mjs`(수집·검증·동시성) + `lib/db.mjs`.
 이메일 알림은 `lib/alerts.mjs`(구독 SQL, **사용자 요청 경로에서 쓰기를 하는 유일한 파일**)
 + `lib/mail.mjs`(Resend 발송·템플릿) + `lib/http.mjs` 의 `handleAlerts`.
 
@@ -84,7 +84,12 @@ GitHub Actions(10분마다 curl 1회) → /api/cron → lib/collect.mjs → Stea
     워터마크(`notified_price`)는 **발송에 성공한 뒤에만** 올린다 — 먼저 올리면 실패한 하락을 영영 못 알린다.
 14. **구독 확인·해지는 GET 으로 처리하지 않는다.** 메일 클라이언트와 보안 스캐너가 링크를 미리 열기 때문에
     본인이 누르지 않은 확정·해지가 생긴다. `/alerts/confirm` 은 버튼만 그리고 쓰기는 POST 에서만 일어난다.
-15. **메일 관련 테스트는 동적 import 를 쓴다.** 설정은 모듈 로드 시점에 `config.mail` 로 굳는데
+15. **얇은 조합 페이지를 만들지 않는다.** `/genre/<장르>/free`·`/discounted` 는 게임이
+    `MIN_COMBO_GAMES`(5) 미만이면 404 다. 그리고 **링크·페이지·사이트맵이 이 상수 하나를 공유한다** —
+    기준이 갈라지면 사이트맵에 있는데 404 인 URL 이 생겨 색인 전체가 손해를 본다.
+16. **`watchdog` 잡은 이상이 있으면 일부러 던진다.** 실패가 곧 경보다 — 워크플로가 빨개지고
+    GitHub 이 소유자에게 메일을 보낸다. "크론이 실패하네" 하고 스케줄을 끄면 경보를 끄는 것이다.
+17. **메일 관련 테스트는 동적 import 를 쓴다.** 설정은 모듈 로드 시점에 `config.mail` 로 굳는데
     ESM 의 `import` 는 파일 첫 줄보다 먼저 실행돼서, `process.env` 를 위에 적어도 늦는다.
 
 ## 환경변수

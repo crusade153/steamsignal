@@ -4,6 +4,9 @@
   "private": true,
   "description": "Steam 인기 TOP 100, 플레이어 수와 평가를 함께 보는 Steam Pulse",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node --env-file-if-exists=.env server.mjs",
     "dev": "node --env-file-if-exists=.env --watch server.mjs",
