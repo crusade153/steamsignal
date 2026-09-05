@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+
+# 수집 엔드포인트는 색인 대상이 아니다.
+Disallow: /api/
+
+Sitemap: https://steamsignal.vercel.app/sitemap.xml

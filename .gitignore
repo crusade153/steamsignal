@@ -7,3 +7,5 @@ node_modules/
 screenshots/
 test-results/
 .DS_Store
+.vercel
+.env*.local

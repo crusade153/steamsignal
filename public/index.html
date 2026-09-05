@@ -6,16 +6,26 @@
   <meta name="theme-color" content="#101311">
   <title>Steam Pulse — 지금 가장 핫한 스팀 게임</title>
   <meta name="description" content="스팀 인기 게임 TOP 100. 현재 플레이어 수, Steam 유저 평가, 메타크리틱과 할인 정보를 함께 비교하고 다음에 플레이할 게임을 발견하세요.">
+  <link rel="canonical" href="https://steamsignal.vercel.app/">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <meta property="og:site_name" content="Steam Pulse">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ko_KR">
+  <meta property="og:title" content="Steam Pulse — 지금 가장 핫한 스팀 게임">
+  <meta property="og:description" content="스팀 인기 게임 TOP 100. 현재 플레이어 수, Steam 유저 평가, 메타크리틱과 할인 정보를 함께 비교하고 다음에 플레이할 게임을 발견하세요.">
+  <meta property="og:url" content="https://steamsignal.vercel.app/">
+  <meta name="twitter:card" content="summary">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/pages.css">
   <script type="module" src="/app.js"></script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebSite","name":"Steam Pulse","url":"https://steamsignal.vercel.app/","description":"스팀 인기 게임 TOP 100의 동시접속자, 유저 평가, 가격을 10분마다 기록해 추이로 보여 주는 사이트","inLanguage":"ko"}</script>
 </head>
 <body>
   <a class="skip-link" href="#ranking">인기 게임 목록으로 건너뛰기</a>
   <header class="site-header">
     <div class="header-inner">
       <a class="brand" href="/" aria-label="Steam Pulse 홈"><span class="brand-mark" aria-hidden="true">↗</span><span>steam<span class="brand-light">pulse</span><span class="brand-period">.</span></span></a>
-      <nav aria-label="주 메뉴"><a class="nav-active" href="#ranking">인기 차트</a><a href="#methodology">데이터 안내 <span aria-hidden="true">↗</span></a></nav>
+      <nav aria-label="주 메뉴"><a class="nav-active" href="/">인기 차트</a><a href="/rising">급상승</a><a href="/deals">할인</a><a href="/charts/weekly">주간 차트</a><a href="/genre">장르</a></nav>
       <span class="header-caption">FIND YOUR NEXT GAME</span>
     </div>
   </header>
@@ -57,7 +67,6 @@
       </div>
     </section>
   </main>
-  <footer class="site-footer"><div class="container footer-inner"><a class="brand footer-brand" href="/">steam<span class="brand-light">pulse</span><span class="brand-period">.</span></a><p>Steam 공개 데이터로 발견하는 다음 게임.<br><span>Valve 및 Metacritic과 무관한 독립 프로젝트입니다.</span></p><a href="#pageTitle">맨 위로 ↑</a></div></footer>
-  <dialog id="gameDialog" aria-labelledby="modalTitle"><button class="dialog-close" id="modalClose" aria-label="상세 정보 닫기">×</button><div id="modalContent"></div></dialog>
+  <footer class="site-footer"><div class="container footer-inner"><a class="brand footer-brand" href="/">steam<span class="brand-light">pulse</span><span class="brand-period">.</span></a><p>Steam 공개 데이터로 발견하는 다음 게임.<br><span>Valve 및 Metacritic과 무관한 독립 프로젝트입니다.</span></p><nav class="footer-links" aria-label="사이트 메뉴"><a href="/rising">급상승</a><a href="/deals">할인</a><a href="/charts/weekly">주간 차트</a><a href="/genre">장르</a><a href="/sitemap.xml">사이트맵</a></nav></div></footer>
 </body>
 </html>

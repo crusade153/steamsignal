@@ -26,5 +26,35 @@
         }
       ]
     }
+  ],
+  "rewrites": [
+    {
+      "source": "/game/:slug",
+      "destination": "/api/page?route=game&slug=:slug"
+    },
+    {
+      "source": "/rising",
+      "destination": "/api/page?route=rising"
+    },
+    {
+      "source": "/deals",
+      "destination": "/api/page?route=deals"
+    },
+    {
+      "source": "/charts/weekly",
+      "destination": "/api/page?route=weekly"
+    },
+    {
+      "source": "/genre",
+      "destination": "/api/page?route=genres"
+    },
+    {
+      "source": "/genre/:genre",
+      "destination": "/api/page?route=genre&genre=:genre"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api/sitemap"
+    }
   ]
 }
