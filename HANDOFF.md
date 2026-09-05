@@ -54,9 +54,12 @@
 
 ---
 
-## 3. 지금 당장 해야 할 것 — DB 생성과 첫 적재
+## 3. DB 생성과 첫 적재 — **완료 (2026-09-05)**
 
-**이게 다음 세션의 첫 번째 관문이다.** SQL 은 검토만 했고 실행해본 적이 없다.
+Neon 프로젝트 `ap-southeast-1`, DB `neondb` 에 스키마·함수 적용 완료.
+잡 5종 종단 실행까지 성공했다. 결과는 §7-1.
+
+아래는 재현·재구축이 필요할 때를 위한 절차다.
 
 ### 3-1. Neon 프로젝트 생성
 
@@ -64,7 +67,7 @@
 
 ### 3-2. SQL 실행 — 순서가 중요하다
 
-이 PC 에 `psql` 이 없다(Git Bash·Windows PATH 양쪽 확인). 그래서 `npm run db:migrate` 는 지금 실패한다.
+이 PC 에 `psql` 이 없다(Git Bash·Windows PATH 양쪽 확인). 그래서 `npm run db:migrate` 는 실패한다.
 **Neon 웹 콘솔의 SQL Editor** 에 붙여넣는 게 가장 빠르다. 설치할 게 없다.
 
 1. `db/schema.sql` 전체를 붙여넣고 실행
@@ -117,8 +120,13 @@ SELECT job, status, processed, failed, error FROM collector_runs ORDER BY starte
 
 ### P0 — 수익의 전제조건
 
-- [ ] **DB 생성 + 첫 적재 검증** (§3)
-- [ ] **스케줄러 연결** — §6 의 비용 함정을 먼저 읽을 것
+- [x] ~~DB 생성 + 첫 적재 검증~~ (2026-09-05 완료, §7-1)
+- [ ] **Vercel 배포 + `/api/cron` 동작 확인** — 환경변수 `DATABASE_URL`(pooler), `CRON_SECRET` 등록.
+      `curl -H "Authorization: Bearer $CRON_SECRET" "$SITE_URL/api/cron?jobs=chart"` 로 200 확인
+- [ ] **스케줄러 켜기** — 저장소가 공개라 GitHub Actions 무료(§6).
+      repo secrets 에 `SITE_URL`, `CRON_SECRET` 넣고 워크플로가 기본 브랜치에 있는지 확인.
+      **켜고 나면 하루 뒤 `player_hourly` / `player_daily` 가 실제로 쌓이는지 한 번 볼 것** —
+      롤업 겹치기와 prune 은 아직 데이터가 없어 검증되지 않았다
 - [ ] **게임별 SSR 페이지** `/game/[appid]-[slug]` — 동접 추이 차트, 가격 이력, 리뷰 추이.
       읽기 쿼리는 [docs/DATA-PIPELINE.md §6](docs/DATA-PIPELINE.md) 에 이미 작성돼 있다
 - [ ] **sitemap.xml + JSON-LD**(`VideoGame` 스키마) + OG 이미지
@@ -206,13 +214,44 @@ Vercel 환경변수: `DATABASE_URL`(pooler), `CRON_SECRET`.
 | `lib/collect.mjs` 적재 로직 (페이로드 모양, 커서 전진, 덮어쓰기 방지, 멱등 키) | 검증됨 — `tests/collect.test.mjs` |
 | `parseReleaseDate` / `slugify` | 검증됨 — 시간대 4곳 확인 |
 | 기존 API·UI 회귀 | 검증됨 — `npm test` 13개, `npm run build` |
-| **`db/schema.sql`, `db/functions.sql` 실제 실행** | **미검증** — 개발 환경에 Postgres·Docker 없음 |
-| **실제 Steam 응답에 대한 종단 수집** | **미검증** — §3-4 가 첫 확인 |
+| `db/schema.sql`, `db/functions.sql` 실제 실행 | **검증됨 (2026-09-05)** — 테이블 8개, 함수 4개 생성 확인 |
+| 실제 Steam 응답에 대한 종단 수집 | **검증됨 (2026-09-05)** — 잡 5종 전부 성공, §7-1 참고 |
 | **`api/cron.js` 배포 환경 동작** | **미검증** — Vercel 배포 후 확인 필요 |
+| **장시간 누적 동작** (롤업 겹치기, prune 실제 삭제) | **미검증** — 데이터가 하루치도 안 쌓여 아직 지울 게 없다 |
+
+### 7-1. 첫 종단 수집 결과 (2026-09-05)
+
+```
+chart          ok  processed=100 snapshots=100   1.5s
+details        ok  processed=20  failed=0        3.5s
+rollup-hourly  ok  processed=100                 0.6s
+rollup-daily   ok  processed=100                 0.2s
+prune          ok  삭제 0건 (아직 오래된 데이터 없음)
+```
+
+적재된 값 확인:
+
+- `apps` 100행, **임시 제목(`Steam 앱 N`) 0건** — 차트 메타데이터가 100개 이름을 다 채웠다
+- 발매일 파싱 정상 — CS2 가 `2012-08-21` (시간대 버그가 있던 바로 그 케이스)
+- 한글 제목 슬러그 정상 — `1172470-apex-레전드`
+- 상세 20건 중 **가격 19건 / 리뷰 20건** — 한 앱이 리뷰만 응답했고,
+  `has_detail` / `has_reviews` 분기가 의도대로 갈렸다
+- 일 롤업에서 `peak_reported`(62,365) > `peak_observed`(52,366) —
+  Steam 이 준 당일 최고치가 우리 샘플링이 놓친 피크를 잡아냈다. 설계 의도대로다
+
+> `player_daily.day` 는 DATE 라 드라이버가 KST 자정 기준 JS `Date` 로 돌려준다.
+> 화면에 뿌릴 때 `toISOString()` 을 쓰면 하루가 밀린다. 날짜 문자열로 포맷할 것.
 
 ---
 
 ## 8. 명령어 모음
+
+> **`.env` 는 직접 만들어야 한다.** 에이전트 도구로 만든 `.env` / `.env.local` 이 두 번 다 자동 삭제됐다
+> (자격증명 파일 보호 장치로 보인다). 첫 수집은 `$env:DATABASE_URL` 을 세션에 직접 넣어서 돌렸다.
+> 사람이 편집기로 만든 파일은 문제없을 것이다.
+>
+> **로컬 Node 는 v22.18.0 인데 CI(`ci.yml`)와 README 는 24 를 쓴다.** 지금은 문제가 없지만
+> 버전을 맞추거나 CI 를 22 로 낮춰 두는 편이 안전하다.
 
 ```bash
 npm install                                        # 의존성 (워크트리마다 별도)
