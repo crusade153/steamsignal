@@ -1,0 +1,115 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createCollector, slugify, parseReleaseDate } from '../lib/collect.mjs';
+
+// 태그드 템플릿 sql 을 흉내내어 실제 DB 없이 적재 로직(페이로드 모양, 커서 전진, 덮어쓰기 방지)을 검증한다.
+function fakeSql({ targets = [], snapshots = [] } = {}) {
+  const calls = [];
+  const sql = (strings, ...values) => {
+    const text = strings.join(' ? ').replace(/\s+/g, ' ').trim();
+    calls.push({ text, values });
+    if (text.startsWith('INSERT INTO collector_runs')) return Promise.resolve([{ id: 1 }]);
+    if (text.startsWith('SELECT appid FROM apps')) return Promise.resolve(targets);
+    if (text.includes('RETURNING appid')) return Promise.resolve(snapshots);
+    return Promise.resolve([]);
+  };
+  sql.calls = calls;
+  sql.find = fragment => calls.filter(call => call.text.includes(fragment));
+  sql.payload = fragment => JSON.parse(sql.find(fragment)[0].values.find(value => typeof value === 'string' && value.startsWith('[')));
+  return sql;
+}
+
+const chart = {
+  updatedAt: '2026-09-05T10:00:00.000Z',
+  stale: false,
+  games: [
+    { appid: 730, rank: 1, players: 900_000, peakToday: 1_200_000, title: 'Counter-Strike 2', headerImage: 'https://cdn.steamstatic.com/730.jpg' },
+    { appid: 570, rank: 2, players: 500_000, peakToday: 700_000, title: 'Steam 앱 570', headerImage: null }
+  ]
+};
+
+test('차트 적재는 Steam last_update 를 captured_at 으로 쓰고 임시 제목을 표시한다', async () => {
+  const sql = fakeSql({ snapshots: [{ appid: 730 }, { appid: 570 }] });
+  const collector = createCollector({ sql, steam: { getChart: async () => chart } });
+  const result = await collector.run('chart');
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.processed, 2);
+  assert.equal(result.snapshots, 2);
+
+  // 원시 스냅샷의 시각은 우리 시계가 아니라 Steam 이 준 값이어야 재실행이 멱등해진다.
+  const snapshot = sql.find('INSERT INTO player_snapshots')[0];
+  assert.ok(snapshot.values.includes(chart.updatedAt));
+  assert.ok(snapshot.text.includes('ON CONFLICT (appid, captured_at) DO NOTHING'));
+
+  // 메타데이터를 못 받아 만들어진 임시 제목은 플래그가 서고, 제목 UPDATE 에서 걸러진다.
+  const rows = sql.payload('INSERT INTO apps');
+  assert.deepEqual(rows.map(row => row.title_is_fallback), [false, true]);
+  assert.ok(sql.find('UPDATE apps a')[0].text.includes('x.title_is_fallback IS NOT TRUE'));
+
+  // 차트에서 빠진 게임의 순위는 반드시 비운다.
+  assert.equal(sql.find('UPDATE app_stats SET rank = NULL').length, 1);
+});
+
+test('상세 수집은 성공·실패 모두 커서를 전진시키고 실패만 카운터를 올린다', async () => {
+  const sql = fakeSql({ targets: [{ appid: 730 }, { appid: 570 }] });
+  const detail = { name: 'Counter-Strike 2', is_free: true, release_date: { date: '2023년 9월 27일' }, genres: [{ description: '액션' }], developers: ['Valve'], publishers: ['Valve'] };
+  const reviews = { success: 1, query_summary: { total_positive: 900, total_negative: 100, review_score_desc: 'Very Positive' } };
+  const collector = createCollector({
+    sql,
+    steam: { getChart: async () => chart },
+    fetcher: async url => {
+      if (url.includes('570')) return new Response('nope', { status: 500 });
+      return url.includes('appreviews') ? Response.json(reviews) : Response.json({ 730: { success: true, data: detail } });
+    }
+  });
+
+  const result = await collector.run('details');
+  assert.equal(result.processed, 1);
+  assert.equal(result.failed, 1);
+  assert.deepEqual(result.failedIds, [570]);
+  assert.equal(result.status, 'partial');
+
+  // 실패한 앱도 details_fetched_at 이 밀려야 큐가 막히지 않는다.
+  const bumped = sql.find('details_failures = details_failures + 1')[0];
+  assert.ok(bumped.text.includes('details_fetched_at = NOW()'));
+  assert.deepEqual(bumped.values[0], [570]);
+  assert.deepEqual(sql.find('details_failures = 0')[0].values[0], [730]);
+
+  // 한쪽만 실패했을 때 멀쩡한 값을 NULL 로 덮지 않도록 조회 성공 표식이 실려야 한다.
+  const stats = sql.payload('INSERT INTO app_stats (appid, final_price');
+  assert.equal(stats.length, 1);
+  assert.deepEqual([stats[0].has_detail, stats[0].has_reviews], [true, true]);
+  assert.equal(stats[0].positive_ratio, 90);
+
+  // 무료 게임은 가격 0 으로, 발매일은 한국어 문자열에서 파싱된다.
+  const meta = sql.payload('UPDATE apps a SET title');
+  assert.equal(meta[0].release_date, '2023-09-27');
+  assert.equal(meta[0].slug, '730-counter-strike-2');
+  assert.equal(stats[0].final_price, 0);
+});
+
+test('상세 대상이 없으면 아무 것도 쓰지 않는다', async () => {
+  const sql = fakeSql({ targets: [] });
+  const collector = createCollector({ sql, steam: { getChart: async () => chart } });
+  assert.deepEqual(await collector.details(), { processed: 0, failed: 0 });
+  assert.equal(sql.find('INSERT INTO app_stats').length, 0);
+});
+
+test('슬러그와 발매일 파서는 한글·결측을 안전하게 다룬다', () => {
+  assert.equal(slugify('Counter-Strike 2', 730), '730-counter-strike-2');
+  assert.equal(slugify('배틀그라운드', 578080), '578080-배틀그라운드');
+  assert.equal(slugify('', 1), '1');
+  assert.equal(slugify('Steam 앱 42', 42), '42');
+
+  assert.equal(parseReleaseDate('2023년 9월 27일'), '2023-09-27');
+  assert.equal(parseReleaseDate('2024년 3월'), '2024-03-01');
+  assert.equal(parseReleaseDate('Aug 21, 2012'), '2012-08-21');
+  assert.equal(parseReleaseDate('출시 예정'), null);
+  assert.equal(parseReleaseDate(null), null);
+});
+
+test('알 수 없는 잡은 즉시 거부한다', async () => {
+  const collector = createCollector({ sql: fakeSql(), steam: { getChart: async () => chart } });
+  assert.throws(() => collector.run('nope'), /알 수 없는 잡/);
+});

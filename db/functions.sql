@@ -1,0 +1,119 @@
+-- ============================================================================
+-- Steam Pulse — 롤업 / 보관정책 함수
+--
+-- 집계는 Node 로 행을 끌어오지 않고 DB 안에서 끝낸다.
+--   -> Vercel Fast Origin Transfer(무료 10GB/월)와 Active CPU 를 아끼는 가장 큰 한 수.
+-- 모든 함수는 멱등하다. 몇 번을 돌려도 같은 결과가 된다.
+--
+-- 적용:  psql "$DATABASE_URL_DIRECT" -f db/functions.sql
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 시간 롤업. 최근 p_hours 시간만 다시 계산한다(진행 중인 버킷이 갱신되도록 겹쳐서 돌린다).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION rollup_player_hourly(p_hours INTEGER DEFAULT 3)
+RETURNS INTEGER AS $$
+DECLARE
+  affected INTEGER;
+BEGIN
+  INSERT INTO player_hourly (appid, bucket, avg_players, max_players, min_players, best_rank, samples)
+  SELECT appid,
+         date_trunc('hour', captured_at),
+         ROUND(AVG(players))::INTEGER,
+         MAX(players),
+         MIN(players),
+         MIN(rank)::SMALLINT,
+         COUNT(*)::SMALLINT
+    FROM player_snapshots
+   WHERE captured_at >= NOW() - make_interval(hours => p_hours)
+     AND players IS NOT NULL
+   GROUP BY appid, date_trunc('hour', captured_at)
+      ON CONFLICT (appid, bucket) DO UPDATE
+     SET avg_players = EXCLUDED.avg_players,
+         max_players = EXCLUDED.max_players,
+         min_players = EXCLUDED.min_players,
+         best_rank   = EXCLUDED.best_rank,
+         samples     = EXCLUDED.samples;
+
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  RETURN affected;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ---------------------------------------------------------------------------
+-- 일 롤업. KST 기준으로 자른다. 원시 스냅샷을 7일 보관하므로 기본 2일 겹치기면 충분하다.
+-- peak_reported 는 Steam 이 준 당일 최고치라 우리 샘플링이 놓친 피크까지 포함한다.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION rollup_player_daily(p_days INTEGER DEFAULT 2)
+RETURNS INTEGER AS $$
+DECLARE
+  affected INTEGER;
+BEGIN
+  INSERT INTO player_daily (appid, day, avg_players, peak_observed, peak_reported, min_players, best_rank, samples)
+  SELECT appid,
+         (captured_at AT TIME ZONE 'Asia/Seoul')::DATE,
+         ROUND(AVG(players))::INTEGER,
+         MAX(players),
+         MAX(peak_today),
+         MIN(players),
+         MIN(rank)::SMALLINT,
+         COUNT(*)::SMALLINT
+    FROM player_snapshots
+   WHERE captured_at >= NOW() - make_interval(days => p_days)
+     AND players IS NOT NULL
+   GROUP BY appid, (captured_at AT TIME ZONE 'Asia/Seoul')::DATE
+      ON CONFLICT (appid, day) DO UPDATE
+     SET avg_players   = EXCLUDED.avg_players,
+         peak_observed = EXCLUDED.peak_observed,
+         peak_reported = GREATEST(player_daily.peak_reported, EXCLUDED.peak_reported),
+         min_players   = EXCLUDED.min_players,
+         best_rank     = LEAST(player_daily.best_rank, EXCLUDED.best_rank),
+         samples       = EXCLUDED.samples;
+
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  RETURN affected;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ---------------------------------------------------------------------------
+-- 보관정책. 원시는 7일, 시간 롤업은 90일. 일 롤업은 지우지 않는다.
+-- 이 함수가 없으면 Neon 무료 0.5GB 를 1년 안에 넘긴다 — 파이프라인의 필수 부품이다.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION prune_timeseries(
+  p_snapshot_days INTEGER DEFAULT 7,
+  p_hourly_days   INTEGER DEFAULT 90
+)
+RETURNS TABLE (snapshots_deleted BIGINT, hourly_deleted BIGINT) AS $$
+DECLARE
+  snaps BIGINT;
+  hours BIGINT;
+BEGIN
+  DELETE FROM player_snapshots WHERE captured_at < NOW() - make_interval(days => p_snapshot_days);
+  GET DIAGNOSTICS snaps = ROW_COUNT;
+
+  DELETE FROM player_hourly WHERE bucket < NOW() - make_interval(days => p_hourly_days);
+  GET DIAGNOSTICS hours = ROW_COUNT;
+
+  -- 90일 넘게 차트에 없었고 상세도 계속 실패하는 앱은 마스터에서 정리한다.
+  -- ON DELETE CASCADE 로 딸린 시계열도 함께 사라진다.
+  DELETE FROM apps
+   WHERE details_failures >= 5
+     AND COALESCE(last_charted_at, first_seen_at) < NOW() - INTERVAL '90 days';
+
+  RETURN QUERY SELECT snaps, hours;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ---------------------------------------------------------------------------
+-- 오래된 실행 로그 정리 (30일).
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION prune_collector_runs(p_days INTEGER DEFAULT 30)
+RETURNS BIGINT AS $$
+DECLARE
+  affected BIGINT;
+BEGIN
+  DELETE FROM collector_runs WHERE started_at < NOW() - make_interval(days => p_days);
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  RETURN affected;
+END;
+$$ LANGUAGE plpgsql;

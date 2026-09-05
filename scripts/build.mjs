@@ -1,7 +1,7 @@
 import { access, readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 
-for (const file of ['server.mjs', 'lib/steam.mjs', 'lib/http.mjs', 'public/app.js', 'api/games.js', 'api/game-details.js', 'api/health.js']) {
+for (const file of ['server.mjs', 'lib/steam.mjs', 'lib/http.mjs', 'public/app.js', 'api/games.js', 'api/game-details.js', 'api/health.js', 'api/cron.js', 'lib/db.mjs', 'lib/collect.mjs', 'scripts/collect.mjs']) {
   execFileSync(process.execPath, ['--check', file], { stdio: 'inherit' });
 }
 for (const file of ['public/index.html', 'public/styles.css', 'public/favicon.svg']) await access(file);

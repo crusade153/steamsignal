@@ -1,0 +1,61 @@
+name: Collect
+
+# 스케줄러(GitHub Actions)와 워커(Vercel 함수)를 분리한다.
+#   - Actions 는 curl 한 번만 친다  -> 실행당 ~5초. 비공개 저장소의 무료 2,000분 안에도 넉넉히 들어간다.
+#   - 실제 수집은 /api/cron 이 한다  -> 하루 ~300 invocations. Hobby 한도(월 100만)의 1% 수준.
+# 체크아웃 + npm ci 를 10분마다 돌리면 Actions 분이 하루 90분씩 녹는다. 그래서 이 방식을 쓴다.
+#
+# Vercel Hobby 의 내장 크론은 하루 1회만 돌기 때문에 여기서 스케줄을 잡는다.
+# Pro 로 올리면 docs/DATA-PIPELINE.md 의 vercel.json crons 블록으로 옮기고 이 파일을 지우면 된다.
+#
+# 필요한 secrets: SITE_URL (예: https://steampulse.example.com), CRON_SECRET
+#
+# 주의 1: schedule 은 기본 브랜치에 있는 워크플로만 실행한다.
+# 주의 2: GitHub 스케줄은 정확하지 않다 — 혼잡하면 수 분 밀리거나 건너뛴다.
+#         captured_at 이 Steam 의 last_update 라서 밀려도 중복·왜곡은 생기지 않는다.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # 차트 + 상세
+    - cron: '5 * * * *'      # 시간 롤업
+    - cron: '20 18 * * *'    # 일 롤업 + 정리 (03:20 KST)
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: '실행할 잡 (쉼표 구분)'
+        required: false
+        default: 'chart,details'
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 실행할 잡 결정
+        id: pick
+        run: |
+          case "${{ github.event.schedule }}" in
+            '5 * * * *')    jobs='rollup-hourly' ;;
+            '20 18 * * *')  jobs='rollup-daily,prune' ;;
+            '*/10 * * * *') jobs='chart,details' ;;
+            *)              jobs='${{ inputs.jobs }}' ;;
+          esac
+          echo "jobs=${jobs:-chart,details}" >> "$GITHUB_OUTPUT"
+
+      - name: 수집 트리거
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          body=$(mktemp)
+          code=$(curl -sS --max-time 120 --retry 2 --retry-delay 15 \
+            -o "$body" -w '%{http_code}' \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${SITE_URL}/api/cron?jobs=${{ steps.pick.outputs.jobs }}")
+          cat "$body"; echo
+          test "$code" = "200"
