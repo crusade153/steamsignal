@@ -1,6 +1,6 @@
-# 인수인계 — Steam Pulse 데이터 파이프라인
+# 인수인계 — Steam Pulse
 
-작성 2026-09-05 · 기준 커밋 `main`
+갱신 2026-09-05 · 기준 커밋 `main`
 
 새 세션은 이 문서부터 읽으면 된다. 설계 근거와 읽기 쿼리는 [docs/DATA-PIPELINE.md](docs/DATA-PIPELINE.md) 에 있다.
 
@@ -8,141 +8,113 @@
 
 ## 0. 한 줄 요약
 
-취미 수준 MVP 를 광고 수익이 나는 사이트로 만들려면 **URL 개수와 자체 시계열**이 필요하다.
-그 토대인 DB 스키마와 크론 수집기를 만들어 `main` 에 올렸다. **아직 DB 는 만들지 않았다.**
+**P0 는 전부 닫혔다.** 파이프라인이 돌고, 페이지가 늘었고, 배포에서 검증했다.
+남은 건 P1(수익화 실장)부터다. 다만 **애드센스 신청은 히스토리가 쌓인 뒤**여야 한다(§4).
+
+라이브: https://steamsignal.vercel.app
 
 ---
 
-## 1. 왜 이걸 먼저 했나
+## 1. 지금 돌고 있는 것
 
-광고 수익 = 페이지뷰 × RPM 인데, 기존 사이트는 구조적으로 페이지뷰가 나올 수 없었다.
+```
+GitHub Actions (10분마다 curl 1회)
+      │  Authorization: Bearer CRON_SECRET
+      ▼
+/api/cron ──► lib/collect.mjs ──► Steam 공개 API
+                    │
+                    ▼
+              Neon Postgres (ap-southeast-1)
+                    │
+                    ▼
+      사용자 요청 (읽기 전용, Steam 을 호출하지 않는다)
+```
 
-| 기존 문제 | 파이프라인이 푸는 방식 |
+| 잡 | 주기 | 하는 일 |
+| --- | --- | --- |
+| `chart` + `details` | 10분 | TOP 100 순위·동접, 앱 20개의 가격·리뷰·메타데이터 |
+| `rollup-hourly` | 매시 05분 | 최근 3시간 재집계 |
+| `rollup-daily` + `prune` | 매일 03:20 KST | 최근 2일 재집계 + 보관정책 |
+
+상세 수집은 라운드로빈이라 앱 100개를 한 바퀴 도는 데 약 50분 걸린다.
+
+### 설정된 값 (2026-09-05 기준)
+
+| 위치 | 키 |
 | --- | --- |
-| 인메모리 캐시가 서버리스 인스턴스마다 따로라 트래픽이 늘면 Steam 을 N배로 호출 | 크론만 Steam 을 호출, 사용자 요청은 DB 만 읽음 |
-| 스토어 HTML 스크래핑이 상시 경로에 있음 | 스크래핑은 10분에 1회, 실패해도 DB 값으로 서비스 유지 |
-| 과거 데이터가 없어 추세·급상승·역대 최저가 불가 | 동접/가격/리뷰를 시계열로 적재 |
-| URL 이 1개뿐이라 검색 유입 ≈ 0 | 앱 마스터가 TOP 100 에 갇히지 않음 → 게임별 페이지 재료 확보 |
+| Vercel `steamsignal` | `DATABASE_URL`(pooler) · `CRON_SECRET` · `SITE_URL` |
+| GitHub `crusade153/steamsignal` secrets | `CRON_SECRET` · `SITE_URL` |
+
+`CRON_SECRET` 은 Vercel 과 GitHub 에 **같은 값**이어야 한다. 로컬에는 저장돼 있지 않으니
+바꿔야 하면 새로 만들어 양쪽에 다시 넣는다(`openssl rand -hex 32`).
 
 ---
 
-## 2. 완료된 것
+## 2. 페이지 지도
 
-- [x] `db/schema.sql` — 테이블 8개 + 인덱스
-- [x] `db/functions.sql` — 롤업 2종, 보관정책 2종
-- [x] `lib/db.mjs` — Neon 클라이언트, 실행 로그 래퍼
-- [x] `lib/collect.mjs` — 수집 잡 5종 (`chart` `details` `rollup-hourly` `rollup-daily` `prune`)
-- [x] `api/cron.js` — 크론 엔드포인트 (시크릿 인증, 미설정 시 401)
-- [x] `scripts/collect.mjs` — CLI
-- [x] `.github/workflows/collect.yml` — 스케줄러
-- [x] `tests/collect.test.mjs` — 신규 테스트 5개
-- [x] `docs/DATA-PIPELINE.md` — 설계 근거 + 읽기 쿼리 모음
-- [x] `npm run build` 통과, `npm test` **13개 전부 통과**
+| 경로 | 렌더링 | 내용 |
+| --- | --- | --- |
+| `/` | 클라이언트 | TOP 100. `/api/games` 한 번으로 평가·가격까지 받는다 |
+| `/game/<appid>-<slug>` | SSR | 동접 차트, 역대 최고 동접, 가격·역대 최저가, 리뷰 추이, 같은 장르 추천 |
+| `/rising` | SSR | 두 시간대 평균 동접 비교. Steam 이 안 주는 우리 콘텐츠 |
+| `/deals` | SSR | 긍정률 75%↑ 할인 + 역대 최저가 판정 |
+| `/charts/weekly` | SSR | 7일 평균 동접 순위 |
+| `/genre`, `/genre/<장르>` | SSR | 장르 허브 |
+| `/sitemap.xml`, `/robots.txt` | SSR / 정적 | 색인 |
 
-### 작업 중 고친 실제 버그
-
-`parseReleaseDate` 가 `Date.parse` 결과에 `toISOString()` 을 쓰고 있었다.
-발매일은 '시각'이 아니라 '달력 날짜'라 로컬 자정이 UTC 로 밀리면서 **하루가 어긋났다**
-(`Aug 21, 2012` → `2012-08-20`). 시간대 4곳(UTC/KST/뉴욕/오클랜드)에서 동일 결과가 나오도록 고치고 테스트로 고정했다.
-
-### 기존 파일 변경
-
-- `lib/steam.mjs` — `appDetailsUrl` / `appReviewsUrl` 추출 (지역·언어 파라미터가 API 서버와 수집기에서 어긋나면 통화가 달라지므로 한곳에서만 생성). 동작 변경 없음, 기존 테스트 8개 그대로 통과
-- `package.json` — `@neondatabase/serverless` 의존성, `collect` / `db:migrate` 스크립트
-- `scripts/build.mjs` — 신규 파일 문법 검사 대상 추가
-- `vercel.json` — `api/*.js` 함수 설정
+라우트는 [lib/routes.mjs](lib/routes.mjs) 한곳에 있고, `vercel.json` 의 rewrites 를 거기서 만든다.
+`npm run build` 가 둘의 일치를 검사한다 — **어긋나면 로컬은 되는데 배포에서만 404 가 난다.**
 
 ---
 
-## 3. DB 생성과 첫 적재 — **완료 (2026-09-05)**
+## 3. 검증된 것 / 아직 아닌 것
 
-Neon 프로젝트 `ap-southeast-1`, DB `neondb` 에 스키마·함수 적용 완료.
-잡 5종 종단 실행까지 성공했다. 결과는 §7-1.
+| 대상 | 상태 |
+| --- | --- |
+| 스키마·함수 실제 실행 | 검증됨 (2026-09-05) |
+| 종단 수집 (Steam → Neon) | 검증됨 — 잡 5종 전부 성공 |
+| `/api/cron` 배포 동작 | **검증됨** — 인증 401/200 양쪽, 잡 실행까지 확인 |
+| GitHub Actions 스케줄러 | **검증됨** — workflow_dispatch 로 종단 성공 (11초) |
+| SSR 페이지·사이트맵·구조화 데이터 | **검증됨** — `node check.mjs --live` 가 배포를 직접 확인 |
+| CDN 캐시 | **검증됨** — `X-Vercel-Cache: HIT`. DB 는 페이지당 10분에 한 번만 읽힌다 |
+| 단위 테스트 | 32개 통과 (`npm test`) |
+| **장시간 누적 동작** | **미검증** — 롤업 겹치기와 `prune` 의 실제 삭제는 데이터가 더 쌓여야 확인된다 |
+| **급상승 순위의 실제 산출** | **미검증** — 시간 롤업이 최소 몇 시간은 쌓여야 첫 순위가 나온다 |
 
-아래는 재현·재구축이 필요할 때를 위한 절차다.
-
-### 3-1. Neon 프로젝트 생성
-
-[neon.tech](https://neon.tech) 에서 프로젝트를 만든다. 리전은 `ap-southeast-1` (싱가포르) 이 한국에서 가장 가깝다.
-
-### 3-2. SQL 실행 — 순서가 중요하다
-
-이 PC 에 `psql` 이 없다(Git Bash·Windows PATH 양쪽 확인). 그래서 `npm run db:migrate` 는 실패한다.
-**Neon 웹 콘솔의 SQL Editor** 에 붙여넣는 게 가장 빠르다. 설치할 게 없다.
-
-1. `db/schema.sql` 전체를 붙여넣고 실행
-2. 이어서 `db/functions.sql` 전체를 붙여넣고 실행 (테이블이 먼저 있어야 한다)
-
-두 파일 모두 `CREATE TABLE IF NOT EXISTS` / `CREATE OR REPLACE FUNCTION` 이라 **여러 번 실행해도 안전하다.**
-
-### 3-3. 환경변수
-
-프로젝트 루트에 `.env` 를 만든다. `.gitignore` 에 이미 들어 있다. 양식은 `.env.example` 참고.
-
-```
-DATABASE_URL=postgresql://...@ep-xxx-pooler.<region>.aws.neon.tech/neondb?sslmode=require
-```
-
-**반드시 `-pooler` 가 붙은 엔드포인트를 쓴다.** 서버리스는 스케일아웃할 때마다 커넥션을 새로 열어서
-직접 연결은 금방 고갈된다.
-
-### 3-4. 첫 수집 확인
-
-```bash
-node --env-file=.env scripts/collect.mjs chart
-```
-
-기대 출력:
-
-```json
-{"job":"chart","status":"ok","processed":100,"snapshots":100,"capturedAt":"...","stale":false,"ms":...}
-```
-
-이어서 상세까지:
-
-```bash
-node --env-file=.env scripts/collect.mjs details
-```
-
-확인 쿼리:
+### 하루 뒤에 꼭 볼 것
 
 ```sql
-SELECT COUNT(*) FROM player_snapshots;      -- 100 근처
-SELECT COUNT(*) FROM apps;                  -- 100 근처
-SELECT job, status, processed, failed, error FROM collector_runs ORDER BY started_at DESC LIMIT 5;
+-- 1. 스케줄러가 계속 돌고 있나
+SELECT job, status, processed, failed, started_at, error
+  FROM collector_runs ORDER BY started_at DESC LIMIT 20;
+
+-- 2. 롤업이 실제로 쌓이나 (여기가 비어 있으면 /rising 과 /charts/weekly 가 빈 페이지다)
+SELECT COUNT(*), MIN(bucket), MAX(bucket) FROM player_hourly;
+SELECT COUNT(*), MIN(day), MAX(day) FROM player_daily;
+
+-- 3. 원시 스냅샷이 7일 뒤 실제로 지워지나 (prune 검증)
+SELECT COUNT(*), MIN(captured_at) FROM player_snapshots;
 ```
 
-> **여기서 SQL 오타가 드러난다.** 에러가 나면 메시지를 그대로 들고 오면 된다.
+그리고 브라우저로 https://steamsignal.vercel.app/rising 을 열어 순위가 나오는지 본다.
+안 나오면 §5-2 의 창 좁히기 로직을 보면 된다.
 
 ---
 
-## 4. 그다음 할 일 (우선순위 순)
-
-### P0 — 수익의 전제조건
-
-- [x] ~~DB 생성 + 첫 적재 검증~~ (2026-09-05 완료, §7-1)
-- [ ] **Vercel 배포 + `/api/cron` 동작 확인** — 환경변수 `DATABASE_URL`(pooler), `CRON_SECRET` 등록.
-      `curl -H "Authorization: Bearer $CRON_SECRET" "$SITE_URL/api/cron?jobs=chart"` 로 200 확인
-- [ ] **스케줄러 켜기** — 저장소가 공개라 GitHub Actions 무료(§6).
-      repo secrets 에 `SITE_URL`, `CRON_SECRET` 넣고 워크플로가 기본 브랜치에 있는지 확인.
-      **켜고 나면 하루 뒤 `player_hourly` / `player_daily` 가 실제로 쌓이는지 한 번 볼 것** —
-      롤업 겹치기와 prune 은 아직 데이터가 없어 검증되지 않았다
-- [ ] **게임별 SSR 페이지** `/game/[appid]-[slug]` — 동접 추이 차트, 가격 이력, 리뷰 추이.
-      읽기 쿼리는 [docs/DATA-PIPELINE.md §6](docs/DATA-PIPELINE.md) 에 이미 작성돼 있다
-- [ ] **sitemap.xml + JSON-LD**(`VideoGame` 스키마) + OG 이미지
-- [ ] **파생 페이지로 URL 확장** — `/rising`(급상승), `/deals`(고평가 할인), `/charts/weekly`, `/genre/[장르]`.
-      급상승은 Steam 이 제공하지 않는 우리만의 콘텐츠라 SEO 가치가 가장 높다
+## 4. 다음 할 일
 
 ### P1 — 수익화 실장
 
 - [ ] 개인정보처리방침 · 이용약관 · `ads.txt` · 문의 페이지 (애드센스 심사 필수)
 - [ ] GA4 또는 Plausible
-- [ ] 광고 슬롯 — **`min-height` 를 미리 예약해 CLS 방어**. 현재 CLS 는 좋은데 광고 넣으면 무너진다.
-      위치: 목록 20개마다 in-feed 1개 + 게임 상세 상하단
+- [ ] 광고 슬롯 — **`min-height` 를 미리 예약해 CLS 방어.** 위치는 목록 20개마다 in-feed 1개 +
+      게임 상세 상하단. 지금 CLS 는 좋은데 광고를 그냥 넣으면 무너진다
 - [ ] 어필리에이트 검토 (Humble/Fanatical 등이 애드센스보다 RPM 이 높은 경우가 많다)
+- [ ] Google Search Console 에 `https://steamsignal.vercel.app/sitemap.xml` 제출
+      — 사이트맵은 이미 나오고 있지만 아무도 제출하지 않았다
 
-> 애드센스는 페이지 1개짜리 데이터 미러를 "가치가 낮은 콘텐츠"로 반려할 가능성이 높다.
-> **P0 의 게임별 페이지와 히스토리가 쌓이기 전에는 신청하지 말 것.**
+> **애드센스는 히스토리가 쌓인 뒤에 신청한다.** 지금 게임 페이지의 차트는 표본이 몇 시간뿐이라
+> "데이터가 쌓이는 중"이 많이 보인다. 최소 1~2주는 돌린 뒤가 승산이 높다.
 
 ### P2 — 재방문
 
@@ -152,22 +124,21 @@ SELECT job, status, processed, failed, error FROM collector_runs ORDER BY starte
 ### P3 — 운영
 
 - [ ] 레이트리밋, Sentry, 스테이징, DB 백업
+- [ ] `ci.yml` 의 Node 24 와 로컬 22.18.0 을 맞추기
 
 ### 별도 — TypeScript 전환
 
-전환은 해야 하지만 **지금 제자리에서 하지 말 것.** P0 의 SSR 이 들어오면 Next.js 로 가게 되는데,
-바닐라 JS → 바닐라 TS → Next.js TS 로 두 번 옮기게 된다.
-
-- 지금 당장 (1시간): `tsconfig.json` 에 `allowJs` + `checkJs` + `strict` 만 켜고
-  `scripts/build.mjs` 에 `tsc --noEmit` 추가. 배포 방식은 안 바뀐다
-- P0 착수 시 (1~2일): Next.js App Router + TS 로 이관.
-  `normalizeRanks` / `normalizeDetails` / `parseIds` 는 순수 함수라 거의 1:1 로 옮겨진다
+SSR 은 Next.js 없이 바닐라 함수로 넣었다(2026-09-05 결정). 지금 구조에서 TS 로 가려면
+`tsconfig.json` 에 `allowJs` + `checkJs` + `strict` 를 켜고 `scripts/build.mjs` 에 `tsc --noEmit` 을
+추가하면 된다. 배포 방식은 바뀌지 않는다.
 
 ---
 
-## 5. 설계에서 기억할 4가지
+## 5. 설계에서 기억할 것
 
-새 세션이 맥락 없이 코드를 고치다 깨뜨리기 쉬운 지점들이다.
+새 세션이 맥락 없이 고치다 깨뜨리기 쉬운 지점들이다.
+
+### 5-1. 수집 (기존)
 
 1. **시계열 3단 계층은 선택이 아니다.** 원시를 그냥 쌓으면 100개 × 144회/일 × 365일 =
    526만 행 ≈ 580MB 로 Neon 무료 0.5GB 를 1년 안에 넘긴다. 원시(7일) → 시간(90일) → 일(영구) +
@@ -175,6 +146,7 @@ SELECT job, status, processed, failed, error FROM collector_runs ORDER BY starte
 
 2. **멱등성 키는 Steam 의 `last_update` 다.** `player_snapshots.captured_at` 에 우리 시계(`NOW()`)를
    넣으면 크론이 밀리거나 두 번 돌 때 중복 행이 생긴다. 절대 바꾸지 말 것.
+   (실제로 확인됐다 — 배포 검증 때 같은 `capturedAt` 으로 두 번 돌자 `snapshots: 0` 이 나왔다.)
 
 3. **상세 수집 커서는 성공·실패 모두 전진시킨다.** 실패 시 `details_fetched_at` 을 안 밀면
    죽은 앱이 큐 맨 앞에서 영원히 재시도되어 파이프라인이 멈춘다.
@@ -182,91 +154,67 @@ SELECT job, status, processed, failed, error FROM collector_runs ORDER BY starte
 4. **결측을 0 으로 만들지 않는다.** 리뷰 0건이면 `positive_ratio` 는 `NULL` 이지 0 이 아니다.
    `has_detail` / `has_reviews` 표식은 한쪽만 실패했을 때 멀쩡한 값을 `NULL` 로 덮지 않기 위한 것이다.
 
+5. **`apps.header_image` 는 차트가 덮어쓰지 않는다.** 차트가 주는 건 231x87 캡슐이고
+   상세 수집이 받는 건 460x215 헤더다. `COALESCE(apps.header_image, EXCLUDED.header_image)` 순서를
+   뒤집으면 10분마다 좋은 이미지가 작은 캡슐로 되돌아간다 — OG 이미지와 상세 히어로가 그걸 쓴다.
+
+### 5-2. 읽기 (신규)
+
+6. **라우트 정의는 [lib/routes.mjs](lib/routes.mjs) 한곳이다.** `vercel.json` 의 rewrites 를
+   거기서 만들고 빌드가 대조한다. 손으로 `vercel.json` 을 고치면 빌드가 막는다.
+
+7. **DATE 컬럼은 SQL 에서 `TO_CHAR` 로 문자열로 꺼낸다.** 드라이버가 DATE 를 로컬 자정 `Date` 로
+   돌려주기 때문에 화면에서 `toISOString()` 을 한 번만 잘못 쓰면 하루가 밀린다.
+   `formatDay()` 도 문자열만 다룬다. 이 두 규칙이 시간대 버그를 구조적으로 막는다.
+
+8. **급상승은 창을 좁혀 가며 계산하고, 실제로 쓴 창을 화면에 적는다.**
+   적재 초기에는 8일치가 없다. "24시간 대비"라고 써 놓고 3시간을 비교하면 거짓말이 된다.
+   `RISING_WINDOWS` 순서대로 시도해 결과가 5개 이상 나오는 창에서 멈춘다.
+
+9. **게임 상세는 정규 슬러그로 301 한다.** `decodeParam` 이 슬러그를 한 번 더 디코딩하는 이유는
+   경로 세그먼트의 퍼센트 디코딩 시점이 로컬 서버와 Vercel 에서 다르기 때문이다.
+   이게 없으면 한글 슬러그가 자기 자신으로 무한 리다이렉트할 수 있다.
+
+10. **차트 SVG 안에 글자를 넣지 않는다.** 선을 가로로 늘려 채우려면
+    `preserveAspectRatio="none"` 이 필요한데 그 배율이 글자에도 걸린다. 축 라벨은 HTML 로 뺐다.
+
+11. **캐시 헤더는 응답에서 확인할 수 없다.** Vercel 이 `s-maxage` 와 `stale-while-revalidate` 를
+    클라이언트 응답에서 지우고 CDN 에서만 쓴다. 적중 여부는 `X-Vercel-Cache` 로 본다.
+
 ---
 
-## 6. 스케줄러 — 비용 함정
+## 6. 비용 — 왜 지금 구조여야 하나
 
-Vercel **Hobby 내장 크론은 하루 1회만** 돈다. 10분 주기가 필요해 GitHub Actions 로 뺐다.
-
-그런데 **Actions 는 잡 하나를 1분 단위로 올림 과금한다.** 5초짜리 curl 도 1분이다.
-하루 169회 = 월 5,070분이라 **비공개 저장소의 무료 2,000분을 넘긴다.**
-
-| 방식 | 비용 | 판단 |
+| 항목 | 현재 | 한도 |
 | --- | --- | --- |
-| GitHub Actions + **공개 저장소** | 무료 | 현재 워크플로가 이 방식 |
-| GitHub Actions + 비공개 저장소 | 월 ~3,000분 초과 청구 | 권장하지 않음 |
-| Vercel Cron (Pro $20/월) | 플랜 포함, 1분 주기 | 트래픽이 붙으면 이쪽 |
-| cron-job.org / Upstash QStash | 무료 티어 | 외부 의존 추가 |
+| GitHub Actions | 하루 169회 × 1분 = 월 ~5,070분 | **공개 저장소라 무료** |
+| Vercel Function Invocations | 수집 ~5,100/월 + 사용자 요청(CDN 뒤) | 1,000,000/월 |
+| Vercel Fluid Active CPU | 대부분 네트워크 대기 — **첫 주 실측 필요** | 4시간/월 |
+| Neon 스토리지 | 3단 롤업 + prune 으로 1년 뒤 70MB 안쪽 | 0.5GB |
 
-**확인 결과 `crusade153/steamsignal` 은 공개 저장소다 → Actions 는 무료이고 이 결정은 끝났다.**
-현재 워크플로를 그대로 켜면 된다. 나중에 저장소를 비공개로 돌린다면 그때 Vercel Pro 나 외부 크론으로 옮겨야 한다.
+**저장소를 비공개로 돌리면 Actions 가 유료가 된다**(월 ~3,000분 초과 청구).
+그때는 Vercel Pro 의 크론이나 외부 크론(cron-job.org, Upstash QStash)으로 옮겨야 한다.
+Pro 로 올릴 때의 `vercel.json` crons 블록은 [docs/DATA-PIPELINE.md §5](docs/DATA-PIPELINE.md) 에 있다.
 
-워크플로에 필요한 secrets: `SITE_URL`, `CRON_SECRET`.
-Vercel 환경변수: `DATABASE_URL`(pooler), `CRON_SECRET`.
-`CRON_SECRET` 은 `openssl rand -hex 32` 로 만든다. 없거나 틀리면 `/api/cron` 은 401 을 낸다.
-
----
-
-## 7. 미검증 항목 — 정직하게
-
-| 대상 | 상태 |
-| --- | --- |
-| `lib/collect.mjs` 적재 로직 (페이로드 모양, 커서 전진, 덮어쓰기 방지, 멱등 키) | 검증됨 — `tests/collect.test.mjs` |
-| `parseReleaseDate` / `slugify` | 검증됨 — 시간대 4곳 확인 |
-| 기존 API·UI 회귀 | 검증됨 — `npm test` 13개, `npm run build` |
-| `db/schema.sql`, `db/functions.sql` 실제 실행 | **검증됨 (2026-09-05)** — 테이블 8개, 함수 4개 생성 확인 |
-| 실제 Steam 응답에 대한 종단 수집 | **검증됨 (2026-09-05)** — 잡 5종 전부 성공, §7-1 참고 |
-| **`api/cron.js` 배포 환경 동작** | **미검증** — Vercel 배포 후 확인 필요 |
-| **장시간 누적 동작** (롤업 겹치기, prune 실제 삭제) | **미검증** — 데이터가 하루치도 안 쌓여 아직 지울 게 없다 |
-
-### 7-1. 첫 종단 수집 결과 (2026-09-05)
-
-```
-chart          ok  processed=100 snapshots=100   1.5s
-details        ok  processed=20  failed=0        3.5s
-rollup-hourly  ok  processed=100                 0.6s
-rollup-daily   ok  processed=100                 0.2s
-prune          ok  삭제 0건 (아직 오래된 데이터 없음)
-```
-
-적재된 값 확인:
-
-- `apps` 100행, **임시 제목(`Steam 앱 N`) 0건** — 차트 메타데이터가 100개 이름을 다 채웠다
-- 발매일 파싱 정상 — CS2 가 `2012-08-21` (시간대 버그가 있던 바로 그 케이스)
-- 한글 제목 슬러그 정상 — `1172470-apex-레전드`
-- 상세 20건 중 **가격 19건 / 리뷰 20건** — 한 앱이 리뷰만 응답했고,
-  `has_detail` / `has_reviews` 분기가 의도대로 갈렸다
-- 일 롤업에서 `peak_reported`(62,365) > `peak_observed`(52,366) —
-  Steam 이 준 당일 최고치가 우리 샘플링이 놓친 피크를 잡아냈다. 설계 의도대로다
-
-> `player_daily.day` 는 DATE 라 드라이버가 KST 자정 기준 JS `Date` 로 돌려준다.
-> 화면에 뿌릴 때 `toISOString()` 을 쓰면 하루가 밀린다. 날짜 문자열로 포맷할 것.
+SSR 페이지는 CDN 에 5~10분 캐시된다. 트래픽이 100배가 돼도 DB 읽기는 거의 늘지 않는다.
 
 ---
 
-## 8. 명령어 모음
-
-> **`.env` 는 직접 만들어야 한다.** 에이전트 도구로 만든 `.env` / `.env.local` 이 두 번 다 자동 삭제됐다
-> (자격증명 파일 보호 장치로 보인다). 첫 수집은 `$env:DATABASE_URL` 을 세션에 직접 넣어서 돌렸다.
-> 사람이 편집기로 만든 파일은 문제없을 것이다.
->
-> **로컬 Node 는 v22.18.0 인데 CI(`ci.yml`)와 README 는 24 를 쓴다.** 지금은 문제가 없지만
-> 버전을 맞추거나 CI 를 22 로 낮춰 두는 편이 안전하다.
+## 7. 명령어 모음
 
 ```bash
-npm install                                        # 의존성 (워크트리마다 별도)
-npm test                                           # 13개
-npm run build                                      # 정적 자산 + 문법 검사
-node --env-file=.env scripts/collect.mjs chart     # 차트 수집
-node --env-file=.env scripts/collect.mjs details   # 상세 수집
+npm ci                                             # 의존성
+npm test                                           # 단위 32개
+npm run build                                      # 문법 검사 + rewrites 일치 검사
+npm run test:e2e                                   # e2e (DB 불필요, 픽스처)
+TEST_URL=https://steamsignal.vercel.app node check.mjs --live   # 배포 직접 검증
+
+node --env-file=.env scripts/collect.mjs chart details
 node --env-file=.env scripts/collect.mjs rollup-hourly rollup-daily prune
+
+gh workflow run collect.yml -R crusade153/steamsignal -f jobs=chart,details   # 수동 트리거
+npx vercel --prod --yes                            # 배포
 ```
 
-운영 상태는 이 쿼리 하나로 본다.
-
-```sql
-SELECT job, status, processed, failed, started_at, finished_at, error
-  FROM collector_runs ORDER BY started_at DESC LIMIT 20;
-```
-
-경보를 걸 조건은 [docs/DATA-PIPELINE.md §7](docs/DATA-PIPELINE.md) 참고.
+> **`.env` 는 사람이 직접 만들어야 한다.** 에이전트 도구로 만든 `.env` / `.env.local` 이 자동 삭제된 적이 있다
+> (자격증명 파일 보호 장치로 보인다). 양식은 [.env.example](.env.example).

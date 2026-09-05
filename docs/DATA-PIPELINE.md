@@ -8,7 +8,7 @@ Steam Pulse 를 "요청마다 Steam 을 긁는 실시간 미러"에서 "자체 �
 | 인메모리 캐시가 서버리스 인스턴스마다 따로라 트래픽이 늘면 Steam 을 N배로 때린다 | 크론만 Steam 을 호출한다. 사용자 요청은 DB 만 읽는다 |
 | 스토어 HTML 스크래핑이 상시 경로에 있다 | 스크래핑은 10분에 한 번, 실패해도 DB 에 남은 값으로 서비스가 산다 |
 | 과거가 없어 추세·급상승·역대 최저가를 만들 수 없다 | 동접/가격/리뷰를 시계열로 적재한다 |
-| URL 이 1개뿐이라 검색 유입이 없다 | 앱 마스터가 TOP 100 에 갇히지 않는다. 게임별 페이지를 만들 재료가 쌓인다 |
+| URL 이 1개뿐이라 검색 유입이 없다 | 앱 마스터가 TOP 100 에 갇히지 않는다. 이 재료로 게임별·파생 페이지를 만들었다 (§6) |
 
 ---
 
@@ -39,6 +39,16 @@ GitHub Actions (스케줄러, curl 1회)
 | [lib/collect.mjs](../lib/collect.mjs) | 수집 잡 5종 |
 | [api/cron.js](../api/cron.js) | 크론 엔드포인트 (시크릿 인증) |
 | [scripts/collect.mjs](../scripts/collect.mjs) | CLI (로컬·수동·비상용) |
+
+읽기 쪽(§6 의 쿼리를 실제로 쓰는 코드)은 이렇게 나뉜다.
+
+| 경로 | 역할 |
+| --- | --- |
+| [lib/queries.mjs](../lib/queries.mjs) | 읽기 전용 쿼리. 여기서 Steam 을 부르는 코드는 없다 |
+| [lib/render.mjs](../lib/render.mjs) | 레이아웃·포맷터·인라인 SVG 차트 |
+| [lib/pages.mjs](../lib/pages.mjs) | 페이지 본문. `{status, headers, body}` 만 돌려주고 HTTP 를 모른다 |
+| [lib/routes.mjs](../lib/routes.mjs) | 라우트 정의 한곳. `vercel.json` 의 rewrites 를 여기서 만든다 |
+| [api/page.js](../api/page.js), [api/sitemap.js](../api/sitemap.js) | Vercel 함수 진입점 |
 
 ---
 
@@ -168,7 +178,12 @@ Vercel Cron 은 `Authorization: Bearer $CRON_SECRET` 을 자동으로 붙여 준
 
 ## 6. 읽기 쿼리
 
-앞으로 만들 페이지들이 이 DB 를 어떻게 읽는지. 전부 `SELECT *` 없이 컬럼을 명시하고 `LIMIT` 을 건다.
+페이지들이 이 DB 를 어떻게 읽는지. 전부 `SELECT *` 없이 컬럼을 명시하고 `LIMIT` 을 건다.
+실제 구현은 [lib/queries.mjs](../lib/queries.mjs) 에 있고, 아래는 그 뼈대다.
+
+> **DATE 컬럼은 `TO_CHAR(day, 'YYYY-MM-DD')` 로 문자열로 꺼낸다.**
+> 드라이버가 DATE 를 로컬 자정 `Date` 객체로 돌려주기 때문에, 화면단에서 `toISOString()` 을
+> 한 번만 잘못 쓰면 하루가 밀린다. 문자열로 받으면 그 실수 자체가 불가능해진다.
 
 ### 목록 (현재 TOP 100) — 왕복 1회
 
@@ -214,6 +229,9 @@ SELECT final_price, discount_percent, observed_at
 ```
 
 ### 급상승 (24시간 vs 직전 7일) — Steam 이 안 주는 우리만의 콘텐츠
+
+적재 초기에는 8일치가 없다. 실제 구현은 창을 좁혀 가며 결과가 나오는 구간에서 멈추고,
+**실제로 사용한 창을 화면에 적는다** — "24시간 대비"라고 써 놓고 3시간을 비교하면 거짓말이 된다.
 
 ```sql
 WITH recent AS (
@@ -267,15 +285,20 @@ SELECT job, status, processed, failed, started_at, finished_at, error
 
 ## 8. 검증 상태
 
-정직하게 적는다.
+정직하게 적는다. (갱신 2026-09-05)
 
 | 대상 | 상태 |
 | --- | --- |
-| `lib/collect.mjs` 의 적재 로직 (페이로드 모양, 커서 전진, 덮어쓰기 방지, 멱등 키) | [tests/collect.test.mjs](../tests/collect.test.mjs) 로 검증. `npm test` 13개 통과 |
-| `parseReleaseDate` / `slugify` | 검증 완료. 시간대 4곳(UTC/KST/뉴욕/오클랜드)에서 동일 결과 확인 |
-| 기존 API·UI 회귀 | `npm test` + `npm run build` 통과 |
-| **`db/schema.sql`, `db/functions.sql` 의 실제 실행** | **미검증.** 이 환경에 Postgres 가 없어 문법·제약을 실행으로 확인하지 못했다 |
-| **실제 Steam 응답에 대한 종단 수집** | **미검증.** Neon 인스턴스를 만든 뒤 `node scripts/collect.mjs chart` 로 첫 확인이 필요하다 |
+| 적재 로직 (페이로드 모양, 커서 전진, 덮어쓰기 방지, 멱등 키) | [tests/collect.test.mjs](../tests/collect.test.mjs) |
+| 읽기·렌더링 (라우팅, 이스케이프, 시간대, 결측 표기, 정규화 301) | [tests/pages.test.mjs](../tests/pages.test.mjs) |
+| `db/schema.sql`, `db/functions.sql` 실제 실행 | 검증됨 — 테이블 8개, 함수 4개 |
+| 종단 수집 (Steam → Neon) | 검증됨 — 잡 5종 전부 성공 |
+| `/api/cron` 배포 동작 | 검증됨 — 401/200 양쪽과 잡 실행 |
+| GitHub Actions 스케줄러 | 검증됨 — 종단 성공 (11초) |
+| SSR 페이지·사이트맵·구조화 데이터 | 검증됨 — `node check.mjs --live` |
+| CDN 캐시 적중 | 검증됨 — `X-Vercel-Cache: HIT` |
+| **장시간 누적 동작** (롤업 겹치기, `prune` 의 실제 삭제) | **미검증** — 지울 만큼 쌓이지 않았다 |
+| **급상승의 실제 산출** | **미검증** — 시간 롤업이 몇 시간은 쌓여야 첫 순위가 나온다 |
 
-먼저 할 일: Neon 프로젝트를 만들고 `npm run db:migrate` 후 `node scripts/collect.mjs chart` 를 돌려
-`player_snapshots` 에 100행이 들어가는지 확인한다. 여기서 SQL 오타가 있다면 그때 드러난다.
+멱등 키는 배포 검증 중에 실제로 확인됐다. 같은 `capturedAt` 으로 두 번 돌리자
+두 번째 실행이 `snapshots: 0` 을 냈다 — `ON CONFLICT DO NOTHING` 이 의도대로 흡수한 것이다.
