@@ -252,3 +252,17 @@ test('gamePath 는 경로 구분자를 만들지 않는다', () => {
   assert.equal(gamePath(730, null), '/game/730');
   assert.ok(!gamePath(1, 'a/b').includes('a/b'));
 });
+
+test('링크 공유용 og:image 는 어느 페이지에도 빠지지 않는다', () => {
+  // 게임 페이지는 Steam 헤더를, 나머지는 브랜드 카드를 쓴다.
+  const withImage = layout({ title: 't', description: 'd', path: '/x', image: 'https://shared.fastly.steamstatic.com/h.jpg', body: '' });
+  assert.ok(withImage.includes('content="https://shared.fastly.steamstatic.com/h.jpg"'));
+
+  const withoutImage = layout({ title: 't', description: 'd', path: '/rising', body: '' });
+  assert.match(withoutImage, /og:image" content="[^"]+\/og-cover\.png"/);
+
+  // 외부 이미지가 섞여 들어와도 남의 서버를 가리키지 않는다.
+  const hostile = layout({ title: 't', description: 'd', path: '/x', image: 'https://evil.example.com/x.jpg', body: '' });
+  assert.ok(!hostile.includes('evil.example.com'));
+  assert.match(hostile, /og:image" content="[^"]+\/og-cover\.png"/);
+});
