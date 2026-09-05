@@ -190,7 +190,8 @@ Vercel **Hobby 내장 크론은 하루 1회만** 돈다. 10분 주기가 필요�
 | Vercel Cron (Pro $20/월) | 플랜 포함, 1분 주기 | 트래픽이 붙으면 이쪽 |
 | cron-job.org / Upstash QStash | 무료 티어 | 외부 의존 추가 |
 
-**저장소가 현재 비공개라면 스케줄러를 켜기 전에 이 결정을 먼저 해야 한다.**
+**확인 결과 `crusade153/steamsignal` 은 공개 저장소다 → Actions 는 무료이고 이 결정은 끝났다.**
+현재 워크플로를 그대로 켜면 된다. 나중에 저장소를 비공개로 돌린다면 그때 Vercel Pro 나 외부 크론으로 옮겨야 한다.
 
 워크플로에 필요한 secrets: `SITE_URL`, `CRON_SECRET`.
 Vercel 환경변수: `DATABASE_URL`(pooler), `CRON_SECRET`.
