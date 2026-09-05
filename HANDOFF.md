@@ -79,11 +79,11 @@ GitHub Actions (10분마다 curl 1회)
 
 | 대상 | 상태 |
 | --- | --- |
-| 스키마·함수 실제 실행 | 검증됨 (2026-09-05) |
+| 스키마·함수 실제 실행 | 검증됨 (2026-09-06) — **테이블 11개, 함수 5개**. §3-2 를 반드시 읽을 것 |
 | 종단 수집 (Steam → Neon) | 검증됨 — 잡 5종 전부 성공 |
 | `/api/cron` 배포 동작 | **검증됨** — 인증 401/200 양쪽, 잡 실행까지 확인 |
 | GitHub Actions 스케줄러 (수동 실행) | **검증됨** — workflow_dispatch 로 종단 성공 (11초) |
-| **스케줄 자동 발화** | **못 쓴다는 쪽으로 기울었다** — 어긋난 분으로 바꾼 뒤에도 10분 간격이 안 지켜진다. §3-1 참고 |
+| 스케줄 자동 발화 | **해결됨 (2026-09-06)** — GitHub 스케줄을 버리고 cron-job.org 로 옮겼다. §3-1 참고 |
 | SSR 페이지·사이트맵·구조화 데이터 | **검증됨** — `node check.mjs --live` 가 배포를 직접 확인 |
 | CDN 캐시 | **검증됨** — `X-Vercel-Cache: HIT`. DB 는 페이지당 10분에 한 번만 읽힌다 |
 | 고정 문서 · 위시리스트 왕복 | 검증됨 — e2e 가 담기→목록→빼기까지 확인 |
@@ -96,63 +96,76 @@ GitHub Actions (10분마다 curl 1회)
 | 급상승 쿼리의 실제 산출 | 검증됨 — 창을 좁혀(1h vs 4h) 돌리자 실제 순위가 나왔다 (War Thunder +8.4% 등) |
 | **`/rising` 의 기본 창(24h vs 7일)** | **미검증** — 시간 롤업이 그만큼 쌓여야 첫 순위가 뜬다. 그전까지는 창을 좁혀 표기한다 |
 
-### 3-1. 스케줄 자동 발화가 안 뜨는 건에 대하여
+### 3-1. 스케줄러를 cron-job.org 로 옮긴 기록 (2026-09-06 해결)
 
-워크플로는 `active` 이고 수동 실행(`workflow_dispatch`)은 성공한다. 그런데
-`*/10 * * * *` 스케줄이 아직 한 번도 자동으로 뜨지 않았다.
+**증상.** 워크플로는 `active` 이고 수동 실행은 늘 성공하는데, `schedule` 이벤트가 거의 안 떴다.
+시간당 9번(10분×6 + 1시간×1 + 30분×2)이 떠야 하는데 **5시간에 2번**만 떴다 — 약 4%.
+DB 로 보면 더 분명했다. 서로 다른 `captured_at` 이 하루 종일 **5개**뿐이었고(10분 간격이면 144개)
+그마저 대부분 수동 실행분이었다.
+
+**시도한 것과 결과.**
+
+1. ~~GitHub 스케줄 지연을 기다린다~~ — 며칠 기다려도 그대로였다.
+2. ~~cron 을 어긋난 분으로 바꾼다~~ — `3,13,23,33,43,53` · `37` · `41 18` 로 바꿨다. **효과 없었다.**
+3. **외부 크론으로 옮긴다** — 이걸로 해결했다.
+
+**지금 구성 (cron-job.org, 무료).** 코드는 한 줄도 안 고쳤다. `/api/cron` 이 원래
+헤더 하나 붙은 GET 이라 어떤 크론 서비스든 부를 수 있다.
+
+| 작업 | URL | 일정 (Asia/Seoul) |
+| --- | --- | --- |
+| 수집 | `/api/cron?jobs=chart,details` | `*/10 * * * *` |
+| 시간 롤업 | `/api/cron?jobs=rollup-hourly` | `37 * * * *` |
+| 일 롤업+정리 | `/api/cron?jobs=rollup-daily,prune` | `41 3 * * *` |
+| 감시 | `/api/cron?jobs=watchdog` | `7 */2 * * *` · **실패 알림 켤 것** |
+
+인증 헤더는 `X-Cron-Secret: <CRON_SECRET>` 이다. `Authorization: Bearer <CRON_SECRET>` 도 되지만
+값만 붙여넣으면 되는 앞쪽이 실수가 적다(`api/cron.js` 의 `authorized()` 가 둘 다 받는다).
+
+**GitHub Actions 는 지우지 않았다.** `captured_at` 이 Steam 의 `last_update` 라서 두 스케줄러가
+겹쳐 불러도 행이 중복되지 않는다. 저장소가 공개라 Actions 분도 무료다 — 4%짜리 공짜 예비 트리거로 남겨 둔다.
+
+**확인 방법은 워크플로 실행 목록이 아니라 DB 다.**
 
 ```bash
-gh run list -R crusade153/steamsignal -w Collect -e schedule -L 5   # 비어 있으면 아직 안 뜬 것
+node --env-file=.env -e "import('./lib/db.mjs').then(async({getSql})=>{const s=getSql();console.table(await s\`SELECT MAX(captured_at) AS latest, COUNT(DISTINCT captured_at)::int AS ticks FROM player_snapshots\`)})"
 ```
 
-가능성이 높은 순서대로:
+최신 `captured_at` 이 20분 안쪽이면 정상이다. 하루가 지나면 `ticks` 가 144 근처여야 한다.
 
-1. **GitHub 스케줄 지연** — 문서에도 "부하가 높으면 지연되거나 건너뛸 수 있다"고 적혀 있다.
-   `*/10` 처럼 정각·10분 단위는 전 세계에서 가장 붐비는 시각이라 특히 밀린다.
-   새로 추가된 스케줄이 처음 돌기까지 시간이 걸리기도 한다.
-2. ~~cron 을 어긋난 분으로 바꿔 본다~~ — **적용했고, 안 통했다(2026-09-05 적용 → 2026-09-06 확인).**
-   `3,13,23,33,43,53` · `37` · `41 18` 로 바꿨는데도 하루 동안 서로 다른 `captured_at` 이
-   **5개**밖에 안 쌓였다. 10분 간격이면 144개여야 한다. 게다가 그 5개도 대부분 수동 실행분이다.
-3. **여기로 간다** — cron-job.org 나 Upstash QStash. 무료 티어가 있고
-   `/api/cron?jobs=...` 을 `Authorization: Bearer $CRON_SECRET` 헤더로 부르기만 하면 되므로
-   **코드 변경이 전혀 없다.** 옮길 스케줄은 `.github/workflows/collect.yml` 의 `schedule` 블록 그대로다.
-   Vercel Pro 라면 `vercel.json` 의 crons 블록([docs/DATA-PIPELINE.md §5](docs/DATA-PIPELINE.md))으로 옮긴다.
+### 3-2. 코드에 스키마를 추가하면 마이그레이션도 반드시 돌린다 (2026-09-06 사고)
 
-   옮긴 뒤에도 `watchdog` 잡은 그대로 두면 된다 — 어느 스케줄러를 쓰든 판정은 DB 만 본다.
+**`prune` 잡이 500 을 냈다.** 원인은 `function prune_subscriptions() does not exist` 였다.
+확인해 보니 이메일 알림 마이그레이션이 **DB 에 한 번도 적용된 적이 없었다** —
+`subscribers` · `price_alerts` · `mail_deliveries` 세 테이블과 `prune_subscriptions()` 함수가 통째로 없었다.
 
-**확인 방법은 워크플로 실행 목록이 아니라 DB 다.** 스케줄러가 돌고 있다면
-`player_snapshots` 의 최신 `captured_at` 이 20분 안쪽이어야 한다.
+코드에는 다 있었다. `db/schema.sql` 과 `db/functions.sql` 을 고쳤고 테스트도 통과했지만,
+그 파일들은 **저절로 실행되지 않는다.** 아무도 `npm run db:migrate` 를 돌리지 않았고,
+그 기능을 아직 켜지 않아서(`RESEND_API_KEY` 미설정) 몇 주 동안 아무도 눈치채지 못했다.
 
-```sql
-SELECT MAX(captured_at) FROM player_snapshots;
-SELECT job, status, started_at FROM collector_runs ORDER BY started_at DESC LIMIT 5;
+**이 항목의 교훈은 "이 표를 믿지 말라"가 아니라 "이 표를 갱신하라"다.**
+위 §3 의 "스키마·함수 실제 실행 | 검증됨" 이 사고 당시에도 적혀 있었고, 그래서 아무도 의심하지 않았다.
+숫자(테이블 11개 · 함수 5개)를 함께 적어 둔 이유가 이것이다 — 대조할 수 있어야 검증이다.
+
+**앞으로.** `db/*.sql` 을 건드리는 커밋에는 마이그레이션 실행이 따라와야 한다.
+`npm run db:migrate` 는 `psql` 과 `DATABASE_URL_DIRECT` 를 요구하는데 둘 다 없는 환경이면
+**Neon 콘솔의 SQL Editor 에 두 파일을 통째로 붙여넣으면 된다.** 전부
+`CREATE TABLE IF NOT EXISTS` / `CREATE OR REPLACE FUNCTION` / `CREATE INDEX IF NOT EXISTS` 라
+여러 번 돌려도 안전하고 기존 데이터를 건드리지 않는다.
+
+현재 상태를 대조하는 명령:
+
+```bash
+node --env-file=.env -e "import('./lib/db.mjs').then(async({getSql})=>{const s=getSql();const f=await s\`SELECT proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public'\`;const t=await s\`SELECT tablename FROM pg_tables WHERE schemaname='public'\`;console.log('함수',f.length,'개 / 테이블',t.length,'개')})"
 ```
 
-### 하루 뒤에 꼭 볼 것
-
-```sql
--- 1. 스케줄러가 계속 돌고 있나
-SELECT job, status, processed, failed, started_at, error
-  FROM collector_runs ORDER BY started_at DESC LIMIT 20;
-
--- 2. 롤업이 실제로 쌓이나 (여기가 비어 있으면 /rising 과 /charts/weekly 가 빈 페이지다)
-SELECT COUNT(*), MIN(bucket), MAX(bucket) FROM player_hourly;
-SELECT COUNT(*), MIN(day), MAX(day) FROM player_daily;
-
--- 3. 원시 스냅샷이 7일 뒤 실제로 지워지나 (prune 검증)
-SELECT COUNT(*), MIN(captured_at) FROM player_snapshots;
-```
-
-그리고 브라우저로 https://steamsignal.vercel.app/rising 을 열어 순위가 나오는지 본다.
-안 나오면 §5-2 의 창 좁히기 로직을 보면 된다.
-
----
+**함수 5개 · 테이블 11개**가 나와야 한다.
 
 ## 4. 다음 할 일
 
 **[TODO.md](TODO.md) 에 있다.** 할 일 목록이 두 곳에 있으면 반드시 어긋나므로 여기서는 옮겨 두지 않는다.
 
-가장 급한 것 하나만 옮겨 적으면 — **스케줄러가 실제로 도는지 확인하는 것**(§3-1).
+가장 급한 것 하나만 옮겨 적으면 — **24시간 뒤 `captured_at` 이 144개 근처인지, 7일째 `prune` 이 실제로 지우는지 확인하는 것**(§3-1).
 그게 안 돌면 추이·급상승·주간 차트가 영원히 빈 페이지다.
 
 ---

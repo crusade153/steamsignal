@@ -8,36 +8,27 @@
 
 ---
 
-## 0. 지금 당장 — 이게 안 되면 나머지가 다 무의미하다
+## 0. 파이프라인 — 2026-09-06 해결됨
 
-- [ ] **[사람] 스케줄러를 외부 크론으로 옮긴다. GitHub 스케줄은 이 용도로 못 쓴다.**
-
-      2026-09-06 확인 결과 **아직도 10분 간격이 안 지켜진다.** `3,13,23,33,43,53` 으로 어긋나게
-      바꾼 뒤에도 마찬가지다. DB 가 말해 주는 사실:
-
-      | 관측 | 값 |
-      | --- | --- |
-      | `player_snapshots` 의 서로 다른 `captured_at` | **5개** (10분 간격이면 하루 144개여야 한다) |
-      | 마지막 스냅샷 이후 경과 | 98분 |
-      | 그중 대부분 | 수동 실행(`workflow_dispatch`)으로 들어온 것 |
-
-      [HANDOFF §3-1](HANDOFF.md) 의 대안 순서에서 1·2번(지연 대기, 어긋난 분)은 **이미 다 썼다.**
-      남은 것은 3번이다 — **cron-job.org 또는 Upstash QStash**. 둘 다 무료 티어가 있고
-      `/api/cron?jobs=...` 을 `Authorization: Bearer $CRON_SECRET` 로 부르기만 하면 되므로
-      **코드 변경이 전혀 없다.** `.github/workflows/collect.yml` 의 스케줄 5줄을 그대로 옮기면 된다.
-
-      **이게 안 돌면 추이·급상승·주간/월간 차트·리뷰 추이·역대 최저가가 영원히 빈 페이지다.**
-      새로 만든 페이지들이 전부 이 하나에 걸려 있다.
-
+- [x] **[사람] 스케줄러를 cron-job.org 로 옮겼다.** GitHub 스케줄은 10분 간격에 못 쓴다 —
+      시간당 9번 떠야 하는데 5시간에 2번(약 4%)이었다. 어긋난 분으로 바꾸는 것도 효과가 없었다.
+      코드는 한 줄도 안 고쳤다. 구성과 확인 방법은 [HANDOFF §3-1](HANDOFF.md).
+      옮긴 직후 10분 간격이 실제로 지켜지는 것을 DB 로 확인했다.
+- [x] **[사람] 빠져 있던 마이그레이션을 적용했다.** 이메일 알림 테이블 3개와 `prune_subscriptions()`
+      함수가 DB 에 없어서 `prune` 이 500 을 냈다. Neon 콘솔로 적용해 **테이블 11개 · 함수 5개**가 됐다.
+      재발 방지는 [HANDOFF §3-2](HANDOFF.md).
 - [x] **[코드] 파이프라인 감시** — `watchdog` 잡(2시간 간격). 스냅샷 지연·chart 실패·상세 실패율·
-      죽은 앱 수를 보고 하나라도 걸리면 **일부러 실패한다.** 워크플로가 빨개지고 GitHub 이
-      소유자에게 메일을 보내므로 **설정이 필요 없는 경보**다. 조건은
-      [docs/DATA-PIPELINE.md §7](docs/DATA-PIPELINE.md) 과 `HEALTH_LIMITS` 에 있다.
-      수동 확인은 이걸로 한다:
+      죽은 앱 수를 보고 하나라도 걸리면 **일부러 실패한다.** cron-job.org 의 실패 알림이 메일을 보내므로
+      별도 통보 설정이 필요 없다. 조건은 [docs/DATA-PIPELINE.md §7](docs/DATA-PIPELINE.md) 과 `HEALTH_LIMITS`.
+- [ ] **[확인] 24시간 뒤 한 번 본다.** `captured_at` 의 서로 다른 값이 **144 근처**여야 한다.
+      한참 못 미치면 크론 서비스 쪽 실행 이력을 본다.
 
       ```bash
-      node --env-file=.env -e "import('./lib/collect.mjs').then(async({createCollector})=>{const{getSql}=await import('./lib/db.mjs');try{console.log(await createCollector({sql:getSql()}).run('watchdog'))}catch(e){console.log('ALERT:',e.message)}})"
+      node --env-file=.env -e "import('./lib/db.mjs').then(async({getSql})=>{const s=getSql();console.table(await s\`SELECT COUNT(DISTINCT captured_at)::int AS ticks, COUNT(*)::int AS rows, pg_size_pretty(pg_database_size(current_database())) AS db FROM player_snapshots\`)})"
       ```
+- [ ] **[확인] 7일째 되는 날 `prune` 의 실제 삭제를 본다.** 원시 스냅샷이 10만 행 근처에서 **멈춰야** 한다.
+      계속 늘면 보관정책이 안 도는 것이고, 그러면 Neon 무료 0.5GB 를 1년 안에 넘긴다.
+      (지금은 데이터가 7일 미만이라 삭제 0건이 정상이다.)
 
 ---
 
