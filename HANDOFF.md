@@ -120,8 +120,9 @@ SELECT COUNT(*), MIN(captured_at) FROM player_snapshots;
 
 **사람이 해야 할 것 (내가 대신 못 하는 것):**
 
-- [ ] **Vercel 대시보드에서 Web Analytics 켜기** — 스크립트는 이미 나가지만 대시보드에서
-      켜야 집계가 시작된다 (Hobby 무료)
+- [ ] **Vercel 대시보드에서 Web Analytics 켜기 → 그다음 `VERCEL_WEB_ANALYTICS=1` 등록**
+      순서가 중요하다. `/_vercel/insights/script.js` 는 대시보드에서 켠 프로젝트에만 존재해서,
+      변수를 먼저 넣으면 그사이에 방문자마다 404 요청이 하나씩 나간다 (Hobby 무료)
 - [ ] **Google Search Console 에 `https://steamsignal.vercel.app/sitemap.xml` 제출**
       — 사이트맵은 나오고 있지만 아무도 제출하지 않았다. 색인의 출발점이다
 - [ ] **`CONTACT_EMAIL` 정하기** — 지금 문의 페이지는 GitHub 이슈만 안내한다.
@@ -219,8 +220,9 @@ SSR 은 Next.js 없이 바닐라 함수로 넣었다(2026-09-05 결정). 지금 
 16. **광고 슬롯은 `min-height` 를 먼저 잡는다.** 광고가 늦게 로드되며 아래를 밀어내면
     CLS 가 무너지고, 사용자가 누르려던 링크가 손가락 아래에서 어긋난다.
 
-17. **분석 스크립트는 배포 환경에서만 나간다.** `/_vercel/insights/script.js` 는 Vercel 이
-    배포 시에만 주입하는 경로라, 로컬에서 켜면 404 HTML 을 스크립트로 읽으려다 콘솔 오류만 남는다.
+17. **분석 스크립트는 명시적으로 켰을 때만 나간다.** `/_vercel/insights/script.js` 는
+    **대시보드에서 Web Analytics 를 켠 프로젝트에만** 존재한다. 배포 환경이라는 것만으로
+    내보내면 방문자마다 404 요청이 하나씩 나간다 — 실제로 그렇게 배포했다가 live e2e 에서 잡혔다.
 
 ---
 

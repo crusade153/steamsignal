@@ -335,16 +335,18 @@ test('광고 슬롯은 높이를 미리 예약한다 (CLS 방어)', () => {
   assert.match(out, /data-ad-slot="9876543210"/);
 });
 
-test('분석 스크립트는 배포 환경에서만 나간다', () => {
-  // 로컬에서 켜면 /_vercel/insights/script.js 가 404 HTML 을 돌려주고 콘솔 오류만 남는다.
-  const render = path => execFileSync(process.execPath, ['--input-type=module', '-e',
+test('분석 스크립트는 명시적으로 켰을 때만 나간다', () => {
+  // /_vercel/insights/script.js 는 대시보드에서 Web Analytics 를 켠 프로젝트에만 존재한다.
+  // 켜지 않은 채 태그를 내보내면 방문자마다 404 요청이 하나씩 나간다.
+  const render = env => execFileSync(process.execPath, ['--input-type=module', '-e',
     `const { layout } = await import('./lib/render.mjs');
      console.log(layout({ title: 't', description: 'd', path: '/x', body: '' }).includes('_vercel/insights'));`],
-  { cwd: new URL('..', import.meta.url), encoding: 'utf8', env: path }).trim();
+  { cwd: new URL('..', import.meta.url), encoding: 'utf8', env }).trim();
 
-  assert.equal(render({ ...process.env, VERCEL: undefined }), 'false');
-  assert.equal(render({ ...process.env, VERCEL: '1' }), 'true');
-  assert.equal(render({ ...process.env, VERCEL: '1', VERCEL_ANALYTICS: '0' }), 'false');
+  assert.equal(render({ ...process.env, VERCEL_WEB_ANALYTICS: undefined }), 'false');
+  assert.equal(render({ ...process.env, VERCEL: '1', VERCEL_WEB_ANALYTICS: undefined }), 'false',
+    '배포 환경이라는 것만으로는 켜지지 않는다 — 대시보드 토글이 먼저다');
+  assert.equal(render({ ...process.env, VERCEL_WEB_ANALYTICS: '1' }), 'true');
 });
 
 test('모든 페이지 하단에 방침·약관·문의 링크가 있다', () => {

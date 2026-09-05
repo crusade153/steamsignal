@@ -99,10 +99,11 @@ Vercel 은 이 지시를 CDN 에서 쓰고 클라이언트에는 `public, max-ag
 | `ADSENSE_PUBLISHER_ID` | 광고 스크립트도 슬롯도 렌더링되지 않고 `/ads.txt` 는 404 | 애드센스 (`ca-pub-...`) |
 | `ADSENSE_SLOT_DETAIL` | 게임 상세 하단 슬롯 없음 | 애드센스 슬롯 ID |
 | `CONTACT_EMAIL` | 문의 페이지가 GitHub 이슈만 안내 | 문의 주소 |
-| `VERCEL_ANALYTICS=0` | — | Vercel Web Analytics 끄기 (기본은 배포 환경에서 켜짐) |
+| `VERCEL_WEB_ANALYTICS=1` | 분석 스크립트가 나가지 않음 (기본) | Vercel Web Analytics |
 
 Vercel Web Analytics 는 쿠키를 쓰지 않으므로 쿠키 동의 배너가 필요 없습니다.
-대시보드에서 Web Analytics 를 켜야 실제 집계가 시작됩니다.
+**켜는 순서가 중요합니다** — 대시보드 > Analytics > Enable 을 먼저 하고, 그다음 `VERCEL_WEB_ANALYTICS=1` 을 넣습니다.
+`/_vercel/insights/script.js` 는 대시보드에서 켠 프로젝트에만 존재하므로, 순서를 바꾸면 그사이에 방문자마다 404 요청이 나갑니다.
 
 ## 데이터 기준과 한계
 
