@@ -1,0 +1,10 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+await page.goto('http://127.0.0.1:5174/', { waitUntil: 'networkidle' });
+await page.locator('#gameRows .game-row').first().waitFor({ timeout: 30000 });
+await page.screenshot({ path: 'screenshots/steam-signal-board.png', fullPage: true });
+await page.locator('#gameRows .game-button').first().click();
+await page.screenshot({ path: 'screenshots/steam-game-inspector.png', fullPage: false });
+console.log('screenshots captured');
+await browser.close();
