@@ -14,11 +14,15 @@ name: Collect
 # 주의 2: GitHub 스케줄은 정확하지 않다 — 혼잡하면 수 분 밀리거나 건너뛴다.
 #         captured_at 이 Steam 의 last_update 라서 밀려도 중복·왜곡은 생기지 않는다.
 
+# 주의 3: **정각과 0/5분 단위를 피한다.**
+#         GitHub 스케줄은 전 세계가 공유하는 큐라 `*/10` 처럼 딱 떨어지는 시각에 요청이 몰리고,
+#         혼잡하면 밀리거나 아예 건너뛴다. 실제로 `*/10` 으로는 자동 발화가 한 번도 안 떴다.
+#         그래서 아래는 전부 어긋난 분에 잡혀 있다. 간격(10분·1시간·1일)은 그대로다.
 on:
   schedule:
-    - cron: '*/10 * * * *'   # 차트 + 상세
-    - cron: '5 * * * *'      # 시간 롤업
-    - cron: '20 18 * * *'    # 일 롤업 + 정리 (03:20 KST)
+    - cron: '3,13,23,33,43,53 * * * *'   # 차트 + 상세 (10분 간격, 정각 회피)
+    - cron: '37 * * * *'                 # 시간 롤업
+    - cron: '41 18 * * *'                # 일 롤업 + 정리 (03:41 KST)
   workflow_dispatch:
     inputs:
       jobs:
@@ -38,11 +42,14 @@ jobs:
       - name: 실행할 잡 결정
         id: pick
         run: |
+          # 이 문자열들은 위 schedule 블록과 **글자 그대로** 같아야 한다.
+          # 어긋나면 조용히 기본값(chart,details)으로 떨어져 롤업이 영영 안 돈다.
+          # scripts/build.mjs 가 두 목록을 대조한다.
           case "${{ github.event.schedule }}" in
-            '5 * * * *')    jobs='rollup-hourly' ;;
-            '20 18 * * *')  jobs='rollup-daily,prune' ;;
-            '*/10 * * * *') jobs='chart,details' ;;
-            *)              jobs='${{ inputs.jobs }}' ;;
+            '37 * * * *')                 jobs='rollup-hourly' ;;
+            '41 18 * * *')                jobs='rollup-daily,prune' ;;
+            '3,13,23,33,43,53 * * * *')   jobs='chart,details' ;;
+            *)                            jobs='${{ inputs.jobs }}' ;;
           esac
           echo "jobs=${jobs:-chart,details}" >> "$GITHUB_OUTPUT"
 

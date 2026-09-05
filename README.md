@@ -71,8 +71,8 @@ api/               Vercel Node.js Functions
 server.mjs         로컬 서버 (배포와 같은 렌더러·라우트를 쓴다)
 ```
 
-설계 근거와 읽기 쿼리는 [docs/DATA-PIPELINE.md](docs/DATA-PIPELINE.md), 현재 상태와 다음 할 일은
-[HANDOFF.md](HANDOFF.md) 에 있습니다.
+설계 근거와 읽기 쿼리는 [docs/DATA-PIPELINE.md](docs/DATA-PIPELINE.md), 현재 상태와 건드리면 깨지는
+지점은 [HANDOFF.md](HANDOFF.md), 앞으로 할 일은 [TODO.md](TODO.md) 에 있습니다.
 
 ### API
 
