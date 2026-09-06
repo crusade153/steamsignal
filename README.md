@@ -6,6 +6,8 @@ Steam 게임의 동시접속자·유저 평가·한국 가격을 10분마다 기
 
 Steam 이 보여 주는 건 '지금'뿐입니다. 이 사이트는 그 '지금'을 계속 적어 두었다가
 어제와 지난주를 함께 보여 줍니다 — 급상승, 역대 최고 동접, 역대 최저가는 전부 거기서 나옵니다.
+목록의 미니 차트는 원시 동접의 반복되는 하루 곡선이 아니라 추적군 비중 변화와 전일 동시간 대비를
+같은 ±50% 축으로 보여 주므로, 게임 사이의 변화 방향과 크기를 바로 비교할 수 있습니다.
 
 ## 실행
 
@@ -25,11 +27,11 @@ npm run dev
 | 경로 | 내용 |
 | --- | --- |
 | `/` | 현재 동접 TOP 100. 검색·정렬·페이지가 URL 에 남습니다 (`/?page=5`, `/?q=Stardew`) |
-| `/game/<appid>-<slug>` | 동접 추이 차트, 역대 최고 동접, 가격과 역대 최저가, 리뷰 추이, 같은 장르 추천 |
+| `/game/<appid>-<slug>` | 동접 추이 차트, 역대 최고 동접, 가격·할인 종료일·역대 최저가, 리뷰 추이, 같은 장르 추천 |
 | `/game/<appid>-<slug>/reviews` | 누적 긍정률 vs **최근 신규 리뷰**의 긍정률. Steam 화면에 없는 숫자입니다 |
 | `/rising` | 두 시간대의 평균 동접을 비교한 급상승 순위. **Steam 이 제공하지 않는 우리 콘텐츠** |
-| `/deals` | Steam 긍정률 75% 이상인 할인. 우리 가격 이력으로 역대 최저가 여부를 표시 |
-| `/deals/all-time-low` | 가격 변동을 2회 이상 관측한 게임 중 **지금이 최저가**인 것만 |
+| `/deals` | Steam 긍정률 75% 이상인 할인. 역대 최저가 여부와 한국시간 할인 종료일을 표시 |
+| `/deals/all-time-low` | 가격 변동을 2회 이상 관측한 게임 중 **지금이 최저가**인 것만. 종료 날짜와 남은 일수 포함 |
 | `/charts/weekly`, `/charts/monthly` | 7일·30일 평균 동접 순위. 하루짜리 이벤트에 흔들리지 않습니다 |
 | `/genre`, `/genre/<장르>` | 장르 허브 |
 | `/genre/<장르>/free`, `/genre/<장르>/discounted` | 장르 조합. 게임 5개 미만이면 만들지 않습니다 |
@@ -44,7 +46,7 @@ npm run dev
 ## 구조
 
 ```text
-GitHub Actions (10분마다 curl 1회)
+cron-job.org (주 스케줄러) + GitHub Actions (예비 트리거)
       │  Authorization: Bearer CRON_SECRET
       ▼
 /api/cron ──► lib/collect.mjs ──► Steam 공개 API
@@ -67,7 +69,7 @@ lib/render.mjs     공용 레이아웃 · 포맷터 · 인라인 SVG 차트
 lib/pages.mjs      SSR 페이지 본문 (HTTP 를 모른다)
 lib/routes.mjs     라우트 정의 한곳 — vercel.json 의 rewrites 를 여기서 만든다
 lib/http.mjs       읽기 API 핸들러
-lib/collect.mjs    수집 잡 8종 (chart / details / rollup-hourly / rollup-daily / prune / alerts / newsletter / watchdog)
+lib/collect.mjs    수집 잡 9종 (chart / details / rollup-hourly / rollup-daily / prune / alerts / newsletter / discover / watchdog)
 lib/steam.mjs      Steam 수집·검증·동시성 제한
 lib/db.mjs         Neon 클라이언트, 실행 로그 래퍼
 db/                스키마와 롤업·보관정책 함수
@@ -123,6 +125,7 @@ Vercel Web Analytics 는 쿠키를 쓰지 않으므로 쿠키 동의 배너가 �
 | 순위 / 현재 동접 / 오늘 최고 | [Steam Charts API](https://api.steampowered.com/ISteamChartsService/GetGamesByConcurrentPlayers/v1/) | 현재 동시접속자 내림차순. 일일 이용자 순위가 아닙니다 |
 | 동접 추이 / 역대 최고 / 급상승 / 주간 차트 | **Steam Pulse 자체 시계열** | 10분 간격 기록의 롤업입니다. 기록 시작 이전은 알 수 없습니다 |
 | 장르 / 한국 가격 / 메타크리틱 | [Steam Store App Details](https://store.steampowered.com/api/appdetails?appids=413150&cc=kr&l=koreana) | Steam 이 제공한 값만 표시합니다 |
+| 할인 종료 날짜 | [Steam Store](https://store.steampowered.com/) 한국시간 상점 페이지 | 본편 현재가·할인율이 일치하는 공식 표시만 읽고, 종료 시각은 추정하지 않습니다 |
 | 유저 평가 | [Steam Reviews API](https://partner.steamgames.com/doc/store/getreviews?l=english) | 전체 언어·전체 구매 유형. 긍정 ÷ (긍정 + 부정), 정수 반올림 |
 
 **결측을 0 으로 만들지 않습니다.** 리뷰가 없으면 긍정률은 `집계 전`이지 0% 가 아니고,

@@ -30,7 +30,7 @@ e2e 는 처음 한 번 `npx playwright install chromium` 이 필요하다.
 트래픽이 늘면 Steam 호출도 같이 늘었다. 지금은 트래픽과 무관하게 Steam 호출량이 고정이다.
 
 ```
-GitHub Actions(10분마다 curl 1회) → /api/cron → lib/collect.mjs → Steam 공개 API
+cron-job.org(주) + GitHub Actions(예비) → /api/cron → lib/collect.mjs → Steam 공개 API
                                                       ↓
                                                 Neon Postgres → 사용자 요청(읽기 전용)
 ```
@@ -42,7 +42,7 @@ GitHub Actions(10분마다 curl 1회) → /api/cron → lib/collect.mjs → Stea
 **읽기 경로의 층은 서로를 모른다.**
 `lib/routes.mjs`(경로 정의) → `lib/pages.mjs`(본문, `{status, headers, body}` 만 반환하고 HTTP 를 모름)
 → `lib/queries.mjs`(읽기 전용 SQL) / `lib/render.mjs`(레이아웃·포맷터·인라인 SVG 차트, DB 도 Steam 도 모름).
-법적 고정 문서는 `lib/legal.mjs`. 수집은 `lib/collect.mjs`(잡 8종, `watchdog` 포함) + `lib/steam.mjs`(수집·검증·동시성) + `lib/db.mjs`.
+법적 고정 문서는 `lib/legal.mjs`. 수집은 `lib/collect.mjs`(잡 9종, `discover`·`watchdog` 포함) + `lib/steam.mjs`(수집·검증·동시성) + `lib/db.mjs`.
 이메일 알림은 `lib/alerts.mjs`(구독 SQL) + `lib/mail.mjs`(Resend 발송·템플릿) + `lib/http.mjs` 의 `handleAlerts`.
 계정은 `lib/accounts.mjs` + `lib/http.mjs` 의 `handleAccount`.
 **사용자 요청 경로에서 쓰기를 하는 파일은 `lib/alerts.mjs` 와 `lib/accounts.mjs` 둘뿐이다.**
@@ -103,10 +103,14 @@ GitHub Actions(10분마다 curl 1회) → /api/cron → lib/collect.mjs → Stea
 19. **차트 밖 게임의 `captured_at` 은 차트와 같은 값이어야 한다.** 차트는 100개만 주므로
     나머지는 `GetNumberOfCurrentPlayers` 로 하나씩 묻는데, 시각이 어긋나면 롤업이 같은 10분을
     두 버킷에 나눠 담아 표본 수가 부풀려진다. 차트 밖 게임에 `rank` 를 적지도 않는다.
-20. **적재 초기에 시간 롤업으로 내려갈 때는 열 이름도 함께 바꾼다.** 48시간을 '7일 추이'라고
-    부르면 이 사이트가 지키는 다른 모든 규율이 무의미해진다 — `sparkSeries()` 가 값과 함께
-    '뭐라고 부를지'를 돌려주는 이유다.
-21. **메일 관련 테스트는 동적 import 를 쓴다.** 설정은 모듈 로드 시점에 `config.mail` 로 굳는데
+20. **목록 스파크라인은 원시 동접을 그리지 않는다.** 원시 48시간은 게임마다 같은 하루 주기를
+    보여 주고, 게임별 최소~최대 정규화는 작은 변화를 과장한다. 첫 24시간은 `추적군 내 비중 변화`,
+    이후 `전일 동시간 대비`, 일 롤업이 충분하면 `일평균 전일 대비`를 쓴다. 세 모드 모두 같은
+    ±50% 축·0% 기준선·현재 변화율을 유지한다. `sparkSeries()` 가 값과 이름을 함께 돌려준다.
+21. **할인 종료일에 시각을 지어내지 않는다.** `appdetails.price_overview`에는 종료일이 없다.
+    할인 중인 앱만 `timezoneOffset=32400` 쿠키를 붙인 공식 상점 페이지에서 본편 현재가·할인율과
+    일치하는 블록을 읽어 `DATE`로 저장한다. 에디션·번들 날짜를 붙이지 않고, 정확한 시각도 추정하지 않는다.
+22. **메일 관련 테스트는 동적 import 를 쓴다.** 설정은 모듈 로드 시점에 `config.mail` 로 굳는데
     ESM 의 `import` 는 파일 첫 줄보다 먼저 실행돼서, `process.env` 를 위에 적어도 늦는다.
 
 ## 환경변수

@@ -40,6 +40,9 @@ try {
     price: i === 1 ? null : 1500000, priceFormatted: i === 1 ? null : '₩ 15,000',
     initialPrice: 3000000, discount: i === 1 ? 0 : 50, isFree: i === 1 ? null : false,
     playersAt: updatedAt, priceAt: updatedAt, reviewsAt: updatedAt,
+    // 스파크라인은 원시 동접이 아니라 전일 대비 변화율이다. 상승·하락·0선 교차를 섞어
+    // 모든 행이 같은 모양으로 보이는 회귀와 현재 변화율 숫자 누락을 함께 잡는다.
+    spark: i % 3 === 0 ? [-12, -4, 8, 16] : i % 3 === 1 ? [18, 9, -3, -11] : [-5, 4, -2, 6],
     // 순위 변동 세 갈래를 다 태운다 — 오름 · 내림 · 비교할 기록 없음(NEW).
     // '오늘의 변화' 타일 셋이 서로 다른 게임을 가리키도록 값을 흩어 놓는다.
     // 셋이 같은 게임을 가리키면 첫 화면 게임 수 검사가 통과해도 아무것도 증명하지 못한다.
@@ -53,7 +56,7 @@ try {
     }
   }));
   games[6].discount = 80;
-  const chartJson = { games, total: 100, updatedAt, retrievedAt: updatedAt, stale: false, source: 'fixture' };
+  const chartJson = { games, total: 100, updatedAt, retrievedAt: updatedAt, stale: false, source: 'fixture', sparkLabel: '전일 동시간 대비' };
   if (!live) await page.route('**/api/games', route => route.fulfill({ json: chartJson }));
 
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
@@ -82,6 +85,9 @@ try {
     assert.ok(await page.locator('.game-row .move.down').count(), '순위 하락 칩이 없다');
     assert.equal(await page.locator('.game-row .move.new').count(), 1, '비교 기록이 없는 행만 NEW 여야 한다');
     assert.match(await page.locator('.game-row').nth(0).textContent(), /▲3/);
+    assert.equal(await page.locator('.game-row .spark-zero').count(), 20, '스파크라인마다 0% 기준선이 있어야 한다');
+    assert.match(await page.locator('.game-row').nth(0).textContent(), /\+16%/);
+    assert.match(await page.locator('.game-row').nth(1).textContent(), /-11%/);
   }
 
   await mkdir('screenshots', { recursive: true });

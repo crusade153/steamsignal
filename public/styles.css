@@ -692,13 +692,20 @@ tbody tr:hover{
 .peak-number{
   color:#adb7aa
 }
-/* 목록 행의 7일 미니 차트. 축도 눈금도 없다 — 모양만 있으면 되고,
-   숫자는 옆 칸에 이미 있다. 오르면 라임, 내리면 무채색이다(색을 늘리지 않는다). */
+/* 목록 행의 전일 대비 미니 차트. 모든 행이 같은 ±50% 축을 쓰고 가운데 선이 0%다.
+   원시 동접의 하루 주기를 다시 그리지 않고 같은 시각의 어제보다 나은지를 보여 준다. */
 .spark-column{
-  width:88px
+  width:126px
 }
 .spark-cell{
   text-align:right
+}
+.spark-wrap{
+  display:inline-flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:7px;
+  min-width:112px
 }
 .spark{
   width:72px;
@@ -714,8 +721,29 @@ tbody tr:hover{
   stroke-linecap:round;
   vector-effect:non-scaling-stroke
 }
-.spark.up path{
+.spark-zero{
+  stroke:#344035;
+  stroke-width:1;
+  stroke-dasharray:3 3;
+  vector-effect:non-scaling-stroke
+}
+.spark-wrap.up path{
   stroke:var(--lime)
+}
+.spark-wrap.down path{
+  stroke:var(--red)
+}
+.spark-delta{
+  min-width:36px;
+  font-size:11px;
+  font-variant-numeric:tabular-nums;
+  color:var(--muted)
+}
+.spark-wrap.up .spark-delta{
+  color:var(--lime)
+}
+.spark-wrap.down .spark-delta{
+  color:var(--red)
 }
 .review-score{
   color:var(--lime);
@@ -778,6 +806,19 @@ tbody tr:hover{
   font-size:11px;
   color:var(--muted);
   white-space:nowrap
+}
+.deadline-cell{
+  min-width:132px;
+  white-space:nowrap
+}
+.sale-deadline{
+  color:var(--text);
+  font-size:12px;
+  font-variant-numeric:tabular-nums
+}
+.deadline-soon{
+  color:var(--red);
+  font-weight:700
 }
 .column-dot{
   display:inline-block;
@@ -1453,8 +1494,12 @@ tbody tr:hover{
   td.spark-cell{
     text-align:left
   }
-  .spark{
+  .spark-wrap{
     width:100%;
+    justify-content:flex-start
+  }
+  .spark{
+    flex:1;
     height:28px
   }
   .game-text strong{

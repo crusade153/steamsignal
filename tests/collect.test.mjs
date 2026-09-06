@@ -96,6 +96,37 @@ test('상세 대상이 없으면 아무 것도 쓰지 않는다', async () => {
   assert.equal(sql.find('INSERT INTO app_stats').length, 0);
 });
 
+test('할인 중인 게임은 한국시간 상점 종료일을 현재값에 함께 저장한다', async () => {
+  const sql = fakeSql({ targets: [{ appid: 289070 }] });
+  const detail = {
+    name: 'Civilization VI', is_free: false,
+    price_overview: { final: 650000, initial: 6500000, discount_percent: 90, final_formatted: '₩ 6,500' }
+  };
+  const reviews = { success: 1, query_summary: { total_positive: 90, total_negative: 10 } };
+  const store = '<p class="game_purchase_discount_countdown">SPECIAL PROMOTION! Offer ends 18 September</p>' +
+    '<div class="discount_block game_purchase_discount" data-price-final="650000" data-discount="90"></div>';
+  const requested = [];
+  const collector = createCollector({
+    sql,
+    now: () => Date.parse('2026-09-06T00:00:00Z'),
+    fetcher: async url => {
+      requested.push(url);
+      if (url.includes('appdetails')) return Response.json({ 289070: { success: true, data: detail } });
+      if (url.includes('appreviews')) return Response.json(reviews);
+      return new Response(store, { headers: { 'content-type': 'text/html' } });
+    }
+  });
+
+  await collector.details();
+  const stats = sql.payload('INSERT INTO app_stats (appid, final_price');
+  assert.equal(stats[0].discount_end_date, '2026-09-18');
+  assert.equal(stats[0].discount_end_checked, true);
+  assert.ok(requested.some(url => url.includes('/app/289070/')), '할인 중일 때만 상점 페이지를 추가 확인해야 한다');
+  const upsert = sql.find('INSERT INTO app_stats (appid, final_price')[0].text;
+  assert.ok(upsert.includes('discount_end_checked_at'));
+  assert.ok(upsert.includes('ELSE app_stats.discount_end_date'), '상점 요청 실패 때 기존 종료일을 보존해야 한다');
+});
+
 test('슬러그와 발매일 파서는 한글·결측을 안전하게 다룬다', () => {
   assert.equal(slugify('Counter-Strike 2', 730), '730-counter-strike-2');
   assert.equal(slugify('배틀그라운드', 578080), '578080-배틀그라운드');

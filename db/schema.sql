@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS app_stats (
   price_formatted   TEXT,
   currency          TEXT         NOT NULL DEFAULT 'KRW',
   price_at          TIMESTAMPTZ,
+  discount_end_date DATE,
+  discount_end_checked_at TIMESTAMPTZ,
 
   total_positive    INTEGER,
   total_negative    INTEGER,
@@ -77,10 +79,19 @@ CREATE TABLE IF NOT EXISTS app_stats (
   reviews_at        TIMESTAMPTZ
 );
 
+-- 기존 DB에도 안전하게 추가된다. Steam appdetails에는 종료일이 없어 할인 중인 앱의
+-- 한국시간 상점 페이지를 별도로 확인하며, checked_at은 '미제공'과 '아직 미확인'을 구분한다.
+ALTER TABLE app_stats ADD COLUMN IF NOT EXISTS discount_end_date DATE;
+ALTER TABLE app_stats ADD COLUMN IF NOT EXISTS discount_end_checked_at TIMESTAMPTZ;
+
 COMMENT ON COLUMN app_stats.final_price IS
   'Steam price_overview.final 원값. 통화 최소단위 x100 이다 (₩15,000 -> 1500000). 표시 전 100 으로 나눌 것.';
 COMMENT ON COLUMN app_stats.positive_ratio IS
   '반올림 정수 %. 리뷰 0건이면 NULL — 0% 로 저장하지 않는다.';
+COMMENT ON COLUMN app_stats.discount_end_date IS
+  'Steam 한국시간 상점 페이지가 표시한 할인 종료 달력 날짜. 시각을 제공하지 않으므로 DATE로 보존한다.';
+COMMENT ON COLUMN app_stats.discount_end_checked_at IS
+  '상점 페이지에서 할인 종료일을 마지막으로 확인한 시각. 날짜 NULL이면 Steam이 종료일을 표시하지 않은 것이다.';
 
 CREATE INDEX IF NOT EXISTS idx_app_stats_rank ON app_stats (rank) WHERE rank IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_app_stats_discount

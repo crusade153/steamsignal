@@ -131,24 +131,33 @@ function renderNotices() {
 // 결측은 0 이 아니다. 아직 수집이 그 게임 차례에 닿지 않았다는 뜻으로 적는다.
 const pending = label => `<span class="missing">${label}</span>`;
 
-// 열 이름은 서버가 정한다. 적재 초기에는 일 롤업이 얇아 시간 롤업으로 내려가는데,
-// 그때도 '7일 추이'라고 써 두면 48시간을 7일이라고 부르는 셈이 된다.
-const sparkLabel = () => state.chart?.sparkLabel || '7일 추이';
+// 열 이름은 서버가 정한다. 첫 24시간의 추적군 비중, 전일 동시간, 일평균 전일 대비는
+// 서로 다른 질문이므로 실제로 계산한 비교 기준을 그대로 적는다.
+const sparkLabel = () => state.chart?.sparkLabel || '전일 대비';
+
+const sparkHelp = label => label === '추적군 내 비중 변화'
+  ? '전체 추적 게임의 동접 합계에서 이 게임이 차지하는 비중이 첫 표본보다 얼마나 변했는지 보여 줍니다.'
+  : label === '전일 동시간 대비'
+    ? '각 시각의 동접을 정확히 24시간 전 같은 시각과 비교한 변화율입니다.'
+    : '각 날짜의 평균 동접을 바로 전날 평균과 비교한 변화율입니다.';
 
 // 목록 행의 미니 차트. lib/render.mjs 의 sparkline() 과 같은 규칙이다 —
 // 표본이 셋 미만이면 그리지 않는다. 두 점을 이으면 무조건 직선이 나오는데
 // 그 직선은 추세처럼 보이면서 아무것도 말해 주지 않는다.
 function spark(game) {
   const points = (game.spark || []).filter(Number.isFinite);
-  if (points.length < 3) return pending('표본 부족');
+  if (points.length < 3) return pending('비교 준비 중');
   const max = Math.max(...points);
   const min = Math.min(...points);
-  const span = Math.max(max - min, 1);
+  const limit = 50;
+  const y = value => 50 - (Math.max(-limit, Math.min(limit, value)) / limit) * 50;
   const path = points.map((value, i) =>
-    `${i ? 'L' : 'M'}${((i / (points.length - 1)) * 100).toFixed(1)} ${(100 - ((value - min) / span) * 100).toFixed(1)}`).join(' ');
-  const rising = points[points.length - 1] >= points[0];
-  const label = `${game.title} ${sparkLabel()} · 표본 ${points.length}개`;
-  return `<svg class="spark ${rising ? 'up' : 'down'}" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="${escape(label)}"><path d="${path}"/></svg>`;
+    `${i ? 'L' : 'M'}${((i / (points.length - 1)) * 100).toFixed(1)} ${y(value).toFixed(1)}`).join(' ');
+  const latest = points[points.length - 1];
+  const direction = latest > 0 ? 'up' : latest < 0 ? 'down' : 'flat';
+  const signed = `${latest > 0 ? '+' : ''}${fmt(latest)}%`;
+  const label = `${game.title} ${sparkLabel()} · 현재 ${signed}, 범위 ${fmt(min)}%~${fmt(max)}%, 표본 ${points.length}개`;
+  return `<span class="spark-wrap ${direction}" title="${escape(label)}"><svg class="spark" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="${escape(label)}"><line class="spark-zero" x1="0" y1="50" x2="100" y2="50"/><path d="${path}"/></svg><span class="spark-delta">${escape(signed)}</span></span>`;
 }
 
 // 순위 변동 칩. 목록에서 가장 값싼 재방문 장치다 — 어제와 오늘이 다르다는 걸
@@ -223,7 +232,9 @@ async function loadChart() {
     if (!Array.isArray(payload.games) || !payload.games.length) throw new Error('순위 응답에 게임이 없습니다.');
     state.chart = payload; state.games = payload.games; state.error = '';
     const sparkHead = document.querySelector('.spark-column');
-    if (sparkHead) sparkHead.textContent = sparkLabel();
+    if (sparkHead) {
+      sparkHead.innerHTML = `${escape(sparkLabel())} <span title="${escape(sparkHelp(sparkLabel()))}" class="info-mark">ⓘ</span>`;
+    }
     $('#updatedAt').textContent = `${clock(payload.updatedAt)} KST 기준`;
     $('#updatedAt').title = `서버 수신: ${clock(payload.retrievedAt)} KST`;
     renderSpotlights();

@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 
 import { ROUTES, rewrites, matchRoute, decodeParam } from '../lib/routes.mjs';
-import { esc, escXml, lineChart, formatDay, won, gameCell, gamePath, safeImage, layout, adSlot, dataTable, COL } from '../lib/render.mjs';
+import { esc, escXml, lineChart, sparkline, formatDay, won, gameCell, gamePath, safeImage, layout, adSlot, dataTable, COL, discountDeadlineCell } from '../lib/render.mjs';
 import {
   parseGameSlug, gamePage, gameReviewsPage, reviewDeltas, risingPage, sitemap, genrePage,
   monthlyPage, dealsLowPage, genreFreePage, genreDiscountedPage, releasePage,
@@ -172,6 +172,20 @@ test('lineChart 좌표는 0~100 을 벗어나지 않고 축 글자는 SVG 밖에
   assert.ok(!svg.includes('<text'));
   assert.ok(svg.includes('class="chart-axis"'));
   assert.ok(svg.includes('시작') && svg.includes('끝'));
+});
+
+test('스파크라인은 전일 대비 공통 축과 현재 변화율을 보여 준다', () => {
+  const up = sparkline([-10, 5, 80], { label: '전일 동시간 대비' });
+  assert.ok(up.includes('class="spark-zero"'), '0% 기준선이 있어야 한다');
+  assert.ok(up.includes('y1="50"') && up.includes('y2="50"'));
+  assert.ok(up.includes('class="spark-wrap up"'));
+  assert.ok(up.includes('+80%'));
+  assert.ok(up.includes('100.0'), '공통 ±50% 축을 넘는 값은 상단에서 잘려야 한다');
+
+  const down = sparkline([4, -2, -7]);
+  assert.ok(down.includes('class="spark-wrap down"'));
+  assert.ok(down.includes('-7%'));
+  assert.equal(sparkline([1, 2]), '', '두 점은 추세로 그리지 않는다');
 });
 
 // --- 게임 상세 --------------------------------------------------------------
@@ -347,15 +361,26 @@ test('역대 최저가는 판정 근거와 한계를 함께 적는다', async ()
     appid: 730, title: 'CS2', slug: '730-cs2', header_image: null, genres: [], metacritic_score: null,
     final_price: 1_000_000, initial_price: 2_000_000, discount_percent: 50, price_formatted: '₩10,000',
     positive_ratio: 86, total_positive: 100, total_negative: 10, players: 1000, rank: 1,
-    lowest_price: 1_000_000, observations: 4, first_seen: '2026-08-01T00:00:00.000Z'
+    lowest_price: 1_000_000, observations: 4, first_seen: '2026-08-01T00:00:00.000Z',
+    discount_end_date: '2026-09-18', discount_end_checked_at: '2026-09-06T00:00:00.000Z'
   }];
   const { body } = await dealsLowPage(fakeSql({ 'FROM app_stats s JOIN apps a USING (appid) JOIN lows': rows }));
   assert.ok(body.includes('역대 최저가'));
   assert.ok(body.includes('기록을 시작한 이후'), '"역대" 의 범위를 밝혀야 한다');
+  assert.ok(body.includes('2026년 9월 18일까지'), '할인 종료일은 한국 날짜로 보여야 한다');
+  assert.ok(body.includes('할인 종료'));
 
   const empty = await dealsLowPage(fakeSql());
   assert.equal(empty.status, 200);
   assert.ok(empty.body.includes('아직 역대 최저가로 판정할 게임이 없습니다'));
+});
+
+test('할인 종료 셀은 남은 기간과 미제공·미확인 상태를 구분한다', () => {
+  const now = Date.parse('2026-09-16T03:00:00Z');
+  assert.match(discountDeadlineCell({ discount_end_date: '2026-09-18' }, now), /2026년 9월 18일까지/);
+  assert.match(discountDeadlineCell({ discount_end_date: '2026-09-18' }, now), /2일 남음/);
+  assert.match(discountDeadlineCell({ discount_end_date: null, discount_end_checked_at: now }, now), /Steam 미제공/);
+  assert.match(discountDeadlineCell({ discount_end_date: null, discount_end_checked_at: null }, now), /확인 중/);
 });
 
 test('조합 페이지는 게임이 적으면 만들지 않는다', async () => {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSteamService, normalizeRanks, normalizeDetails, parseChartMetadata, parseIds, safeSteamImage, normalizePlayerCount, parseStoreAppIds, currentPlayersUrl, topSellersUrl, CHART_URL, STORE_CHART_URL } from '../lib/steam.mjs';
+import { createSteamService, normalizeRanks, normalizeDetails, parseChartMetadata, parseIds, safeSteamImage, normalizePlayerCount, parseStoreAppIds, parseDiscountEndDate, storePageUrl, currentPlayersUrl, topSellersUrl, CHART_URL, STORE_CHART_URL } from '../lib/steam.mjs';
 
 const ranks = Array.from({ length: 100 }, (_, i) => ({ appid: i + 1, rank: i + 1, concurrent_in_game: 10000 - i * 50, peak_in_game: 15000 - i * 50 }));
 const chartHtml = ranks.map(row => `<tr><td><a href="https://store.steampowered.com/app/${row.appid}/Game"><img src="https://shared.fastly.steamstatic.com/${row.appid}.jpg"><div>Game ${row.appid}</div></a></td></tr>`).join('');
@@ -103,4 +103,25 @@ test('스토어 판매 상위에서 appid 만 뽑고 번들은 빼놓는다', ()
   assert.deepEqual(parseStoreAppIds(null), []);
   assert.deepEqual(parseStoreAppIds({}), []);
   assert.match(topSellersUrl(2), /start=100/);
+});
+
+test('할인 종료일은 본편 가격 블록만 골라 한국 달력 날짜로 해석한다', () => {
+  const html = `
+    <p class="game_purchase_discount_countdown">SPECIAL PROMOTION! Offer ends 12 September</p>
+    <div class="discount_block" data-price-final="990000" data-discount="20"></div>
+    <p class="game_purchase_discount_countdown">SPECIAL PROMOTION! Offer ends 18 September</p>
+    <div class="discount_block game_purchase_discount" data-price-final="650000" data-discount="90"></div>`;
+  assert.equal(parseDiscountEndDate(html, {
+    finalPrice: 650000, discountPercent: 90, now: '2026-09-06T00:00:00Z'
+  }), '2026-09-18');
+  assert.equal(parseDiscountEndDate(html, {
+    finalPrice: 123, discountPercent: 90, now: '2026-09-06T00:00:00Z'
+  }), null, '다른 에디션의 종료일을 본편에 붙이면 안 된다');
+
+  const newYear = '<p class="game_purchase_discount_countdown">Offer ends 2 January</p>' +
+    '<div class="discount_block" data-price-final="650000" data-discount="90"></div>';
+  assert.equal(parseDiscountEndDate(newYear, {
+    finalPrice: 650000, discountPercent: 90, now: '2026-12-31T15:30:00Z'
+  }), '2027-01-02');
+  assert.match(storePageUrl(289070), /cc=kr&l=english/);
 });
