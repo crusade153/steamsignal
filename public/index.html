@@ -50,9 +50,8 @@
         <label class="search-box"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><span class="sr-only">TOP 100 게임 검색</span><input id="search" type="search" placeholder="TOP 100에서 게임 검색" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
         <div class="sort-box"><label for="sort">정렬</label><select id="sort"><option value="players">현재 플레이어 순</option><option value="peak">오늘 최고 동접자 순</option><option value="name">게임 이름순</option></select></div>
       </div>
-      <div class="table-status"><span id="resultCount" role="status">순위를 불러오는 중입니다.</span><span id="detailsStatus" role="status"></span></div>
-      <p class="mobile-table-hint">옆으로 넘겨 평가와 가격을 비교하세요 →</p>
-      <div class="table-scroll" tabindex="0" aria-label="인기 게임 표. 작은 화면에서는 좌우로 스크롤할 수 있습니다.">
+      <div class="table-status"><span id="resultCount" role="status">순위를 불러오는 중입니다.</span><span id="detailsStatus" role="status"></span></div>
+      <div class="table-scroll" tabindex="0" aria-label="인기 게임 표">
         <table><caption class="sr-only">Steam 인기 TOP 100. 각 게임 이름을 누르면 상세 정보를 확인할 수 있습니다.</caption><thead><tr><th scope="col" class="rank-column">순위</th><th scope="col" class="game-column">게임</th><th scope="col" class="numeric">현재 플레이어 <span class="column-dot"></span></th><th scope="col" class="numeric peak-column">오늘 최고</th><th scope="col" class="numeric">Steam 평가 <span title="전체 언어 · 전체 구매 유형의 긍정 리뷰 비율" class="info-mark">ⓘ</span></th><th scope="col" class="numeric">메타크리틱 <span title="Steam 스토어가 제공하는 PC 평론가 점수 / 100" class="info-mark">ⓘ</span></th><th scope="col" class="numeric price-column">현재 가격</th></tr></thead><tbody id="gameRows"><tr><td colspan="7" class="empty">Steam 인기 순위를 불러오는 중입니다…</td></tr></tbody></table>
       </div>
       <div class="pagination-bar"><span id="pageSummary">페이지당 20개</span><nav id="pagination" aria-label="게임 목록 페이지"></nav></div>

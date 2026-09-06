@@ -73,14 +73,16 @@ function renderTable() {
   const { all, games } = pageGames();
   writeUrl();
   const maxPlayers = state.games[0]?.players || 1;
+  // data-label 은 장식이 아니다. 720px 아래에서 표가 카드로 바뀌면서 thead 가 숨겨지고,
+  // 그때 각 칸이 이 값으로 스스로 이름을 댄다(styles.css §7). 빠지면 숫자만 나열된다.
   $('#gameRows').innerHTML = games.length ? games.map(game => `<tr class="game-row">
-    <td class="rank-cell ${game.rank <= 3 ? 'top' : ''}">${String(game.rank ?? '—').padStart(2, '0')}</td>
-    <td><a class="game-button" href="${escape(game.path)}">${imageMarkup(game)}<span class="game-text"><strong>${escape(game.title)}</strong><small>${escape(game.genres.slice(0, 2).join(' · ') || '인기 차트')}</small></span></a></td>
-    <td class="numeric"><span class="player-number">${fmt(game.players)}</span><div class="player-track" aria-hidden="true"><i style="width:${Math.max(2, Math.min(100, (game.players || 0) / maxPlayers * 100))}%"></i></div></td>
-    <td class="numeric peak-number">${fmt(game.peakToday)}</td>
-    <td class="numeric">${Number.isFinite(game.positiveRatio) ? `<span class="review-score ${scoreClass(game.positiveRatio)}">${game.positiveRatio}%</span><span class="cell-sub">${fmt(game.reviewTotal)}개 리뷰</span>` : pending('집계 전')}</td>
-    <td class="numeric">${game.metacritic ? `<span class="meta-score ${scoreClass(game.metacritic.score, true)}">${game.metacritic.score}</span>` : pending('미제공')}</td>
-    <td class="numeric">${game.priceFormatted ? `<span class="price-value ${game.isFree ? 'free' : ''}">${escape(game.priceFormatted)}</span>${game.discount > 0 ? `<span class="cell-sub"><span class="discount">-${game.discount}%</span></span>` : ''}` : pending('가격 미확인')}</td>
+    <td class="rank-cell ${game.rank <= 3 ? 'top' : ''}" data-label="순위">${String(game.rank ?? '—').padStart(2, '0')}</td>
+    <td class="game-cell"><a class="game-button" href="${escape(game.path)}">${imageMarkup(game)}<span class="game-text"><strong>${escape(game.title)}</strong><small>${escape(game.genres.slice(0, 2).join(' · ') || '인기 차트')}</small></span></a></td>
+    <td class="numeric" data-label="현재 플레이어"><span class="player-number">${fmt(game.players)}</span><div class="player-track" aria-hidden="true"><i style="width:${Math.max(2, Math.min(100, (game.players || 0) / maxPlayers * 100))}%"></i></div></td>
+    <td class="numeric peak-number" data-label="오늘 최고">${fmt(game.peakToday)}</td>
+    <td class="numeric" data-label="Steam 평가">${Number.isFinite(game.positiveRatio) ? `<span class="review-score ${scoreClass(game.positiveRatio)}">${game.positiveRatio}%</span><span class="cell-sub">${fmt(game.reviewTotal)}개 리뷰</span>` : pending('집계 전')}</td>
+    <td class="numeric" data-label="메타크리틱">${game.metacritic ? `<span class="meta-score ${scoreClass(game.metacritic.score, true)}">${game.metacritic.score}</span>` : pending('미제공')}</td>
+    <td class="numeric price-column" data-label="현재 가격">${game.priceFormatted ? `<span class="price-value ${game.isFree ? 'free' : ''}">${escape(game.priceFormatted)}</span>${game.discount > 0 ? `<span class="cell-sub"><span class="discount">-${game.discount}%</span></span>` : ''}` : pending('가격 미확인')}</td>
   </tr>`).join('') : `<tr><td colspan="7" class="empty">${state.loading && !state.games.length ? '인기 순위를 불러오는 중입니다…' : state.error && !state.games.length ? '순위를 불러오지 못했습니다. 새로고침으로 다시 시도해 주세요.' : '검색에 맞는 게임이 없습니다. TOP 100 안에서 이름이나 게임 ID로 검색해 보세요.'}${state.query ? '<br><button class="button" data-reset-search>검색 초기화</button>' : ''}</td></tr>`;
 
   $('#resultCount').textContent = all.length ? `${all.length}개 게임 · ${(state.page - 1) * pageSize + 1}–${Math.min(state.page * pageSize, all.length)} 표시` : state.loading ? '순위 확인 중' : '0개 게임';

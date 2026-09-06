@@ -82,9 +82,77 @@ try {
   await page.locator('#sort').selectOption('peak');
   await page.locator('#sort').selectOption('players');
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: `screenshots/${live ? 'live' : 'test'}-mobile.png`, fullPage: true });
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'page does not overflow on mobile');
+  // --- 세 폭 검사 -----------------------------------------------------------
+  // 기준은 docs/PRODUCT.md §2-4 의 표다. "모바일에서도 열린다"가 아니라 "모바일에서도 1급"이
+  // 운영자가 정한 선이므로, 가로 넘침만 보지 않고 **뭉개짐과 첫 화면 정보량**을 함께 잰다.
+  //
+  // 예전 검사는 scrollWidth <= innerWidth 하나뿐이었다. 그래서 2026-09-06 의 내비 회귀를
+  // 그대로 통과시켰다 — 항목이 넘친 게 아니라 한 글자씩 세로로 쌓여서 넘치지 않았기 때문이다.
+  // 높이와 폭을 함께 봐야 그게 잡힌다.
+  const measure = () => page.evaluate(() => {
+    const nav = [...document.querySelectorAll('.site-header nav a')].map(a => {
+      const rect = a.getBoundingClientRect();
+      // Range 는 줄 상자 하나당 사각형 하나를 준다. 글자가 접히면 2개 이상이 나온다 —
+      // 폭이나 높이로 어림잡는 것보다 이게 '뭉개짐'의 직접적인 정의다.
+      const range = document.createRange();
+      range.selectNodeContents(a);
+      const lines = range.getClientRects().length;
+      return { text: a.textContent.trim(), w: Math.round(rect.width), h: Math.round(rect.height), lines };
+    });
+    // "첫 화면에 보이는 게임 수". 표의 행이든 스포트라이트 카드든 게임 하나는 게임 하나다 —
+    // 사용자에게는 어느 컴포넌트인지가 아니라 스크롤 없이 몇 개가 보이는지가 전부다.
+    const seen = new Set();
+    for (const a of document.querySelectorAll('a[href^="/game/"]')) {
+      const rect = a.getBoundingClientRect();
+      if (rect.top < innerHeight && rect.bottom > 0 && rect.width > 0) seen.add(a.getAttribute('href'));
+    }
+    const rows = seen.size;
+    const scrollers = [...document.querySelectorAll('.table-scroll')]
+      .map(el => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+    return {
+      overflow: document.documentElement.scrollWidth - innerWidth,
+      navHeight: Math.round(document.querySelector('.site-header nav')?.getBoundingClientRect().height ?? 0),
+      nav,
+      rowsInFirstScreen: rows,
+      scrollers
+    };
+  });
+
+  const widths = [
+    { width: 390, height: 844, name: 'mobile', minRows: 3, cards: true },
+    { width: 768, height: 1024, name: 'tablet', minRows: 3, cards: false },
+    { width: 1440, height: 1000, name: 'desktop', minRows: 6, cards: false }
+  ];
+  const viewportReport = [];
+  for (const size of widths) {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await page.waitForTimeout(120); // 리플로우가 끝난 뒤에 잰다
+    const m = await measure();
+    const at = `${size.width}px`;
+
+    assert.ok(m.overflow <= 1, `${at}: 가로로 ${m.overflow}px 넘친다`);
+    assert.ok(m.nav.length >= 4, `${at}: 내비 항목을 찾지 못했다`);
+    for (const item of m.nav) {
+      // 항목 높이는 판정에 쓰지 않는다 — 링크가 height:100% 라 헤더 높이를 그대로 따라간다.
+      // 접혔는지는 줄 상자 개수가 말해 준다.
+      assert.equal(item.lines, 1, `${at}: 내비 '${item.text}' 가 ${item.lines}줄로 접혔다`);
+      // 터치 목표. 데스크톱은 헤더 높이가 커서 자동으로 통과한다.
+      assert.ok(item.h >= 30, `${at}: 내비 '${item.text}' 의 터치 목표가 ${item.h}px 로 너무 작다`);
+    }
+    assert.ok(m.navHeight <= 96, `${at}: 내비 줄이 ${m.navHeight}px 다 — 두 줄로 접힌 것으로 보인다`);
+    assert.ok(m.rowsInFirstScreen >= size.minRows,
+      `${at}: 첫 화면에 게임이 ${m.rowsInFirstScreen}개뿐이다 (기준 ${size.minRows}개)`);
+    if (size.cards) {
+      // 390px 에서는 표가 카드로 바뀌므로 가로 스크롤이 남아 있으면 안 된다.
+      // 가로로 미루는 것은 통과가 아니다 — 밀린 열은 없는 것과 같다.
+      for (const el of m.scrollers) {
+        assert.ok(el.scroll <= el.client + 1, `${at}: 표가 아직 가로로 ${el.scroll - el.client}px 스크롤된다`);
+      }
+    }
+
+    await page.screenshot({ path: `screenshots/${live ? 'live' : 'test'}-${size.name}.png`, fullPage: true });
+    viewportReport.push(`${at} ok (내비 ${m.navHeight}px · 첫 화면 ${m.rowsInFirstScreen}행)`);
+  }
   await page.setViewportSize({ width: 1440, height: 1000 });
 
   // SSR 페이지는 DB 를 읽으므로 배포를 상대로만 확인한다.
@@ -170,7 +238,8 @@ try {
   const expected = ['/game/999999999-nope', '/api/games'];
   console.log(JSON.stringify({
     mode: live ? 'live deployment' : 'deterministic fixtures',
-    tested: ['20 rows', '100th rank', 'search', 'sorting', 'real game links', 'mobile',
+    tested: ['20 rows', '100th rank', 'search', 'sorting', 'real game links',
+      ...viewportReport,
       ...docsChecked, 'watchlist round-trip',
       ...(live ? ssrChecked : ['escaped titles', 'missing values stay missing', 'API failure state', 'SSR error page'])],
     runtimeErrors: errors,

@@ -97,8 +97,8 @@
 .genre-tile small{font-size:12px;color:var(--muted)}
 .genre-tile:hover strong{color:var(--lime)}
 
-/* SSR 목록은 프런트 목록보다 열이 적어 최소 너비를 낮춘다. */
-.panel table,.game-detail table{min-width:820px}
+/* 표의 최소 너비와 카드 전환은 전부 styles.css §5·§7 이 정한다.
+   두 파일에 나눠 적었더니 나중에 로드되는 이 파일이 반응형 규칙을 조용히 덮어썼다. */
 .table-scroll+.table-footnote{margin-top:14px}
 
 @media(max-width:1100px){
@@ -122,7 +122,6 @@
   .chart-axis{width:48px}
   .chart-axis span{font-size:10px}
   .chart-xaxis{padding-left:56px;font-size:10px}
-  .panel table,.game-detail table{min-width:720px}
   .price-headline{font-size:25px}
 }
 

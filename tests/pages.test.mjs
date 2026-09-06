@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 
 import { ROUTES, rewrites, matchRoute, decodeParam } from '../lib/routes.mjs';
-import { esc, escXml, lineChart, formatDay, won, gameCell, gamePath, safeImage, layout, adSlot } from '../lib/render.mjs';
+import { esc, escXml, lineChart, formatDay, won, gameCell, gamePath, safeImage, layout, adSlot, dataTable, COL } from '../lib/render.mjs';
 import {
   parseGameSlug, gamePage, gameReviewsPage, reviewDeltas, risingPage, sitemap, genrePage,
   monthlyPage, dealsLowPage, genreFreePage, genreDiscountedPage, releasePage,
@@ -292,6 +292,34 @@ test('리뷰 추이도 정규 슬러그로 301 한다', async () => {
   const moved = await gameReviewsPage(sql, { slug: '730' });
   assert.equal(moved.status, 301);
   assert.equal(moved.headers.Location, '/game/730-counter-strike-2/reviews');
+});
+
+// --- 표 ---------------------------------------------------------------------
+
+test('모든 td 는 data-label 을 달고 나온다 — 좁은 화면에서 그게 열 이름이 된다', () => {
+  // 720px 아래에서 표는 카드가 되고 thead 가 숨는다(public/styles.css §7).
+  // 그때 data-label 이 없으면 라벨 없는 숫자만 남는다. 눈으로는 데스크톱에서 멀쩡해 보여서
+  // 이 회귀는 모바일에서만 드러난다 — 그래서 서버 쪽에서 못을 박아 둔다.
+  const html = dataTable(
+    [COL.rank(), COL.game(), COL.players(), COL.review(), COL.meta(), COL.price(),
+      { cellClass: 'action-cell', cell: () => '<button>빼기</button>' }],
+    [{ appid: 730, title: 'CS2', slug: '730-cs2', header_image: null, genres: ['액션'], players: 900_000, positive_ratio: 86, total_positive: 86, total_negative: 14, metacritic_score: 83, final_price: 1_500_000, initial_price: 3_000_000 }]
+  );
+  const cells = html.match(/<td[^>]*>/g);
+  assert.equal(cells.length, 7);
+  // 라벨을 준 여섯 열에는 붙고, 동작 버튼 열에는 붙지 않는다.
+  assert.equal(cells.filter(cell => cell.includes('data-label=')).length, 6);
+  assert.ok(cells[0].includes('data-label="순위"'));
+  assert.ok(cells[1].includes('class="game-cell"'), '게임 칸은 카드의 제목이라 별도 클래스를 갖는다');
+  assert.ok(!cells[6].includes('data-label='), '버튼 열에 라벨을 붙이면 카드에 빈 제목이 생긴다');
+  // 헤더는 숨겨질 뿐 사라지지 않는다 — 스크린리더와 크롤러는 그대로 읽는다.
+  assert.equal((html.match(/<th /g) || []).length, 7);
+});
+
+test('표의 열 라벨도 esc() 를 통과한다', () => {
+  const html = dataTable([{ label: '<img src=x>', cell: () => 'x' }], [{}]);
+  assert.ok(!html.includes('<img src=x'));
+  assert.ok(html.includes('data-label="&lt;img src=x&gt;"'));
 });
 
 // --- 파생 목록 ---------------------------------------------------------------

@@ -61,12 +61,14 @@ function row(game) {
     ? `<img class="game-image" src="${escape(game.headerImage)}" alt="" width="96" height="47" loading="lazy" decoding="async">`
     : '<span class="game-image fallback" aria-hidden="true">▦</span>';
 
+  // data-label 이 좁은 화면의 카드에서 열 이름을 대신한다(styles.css §7).
+  // '빼기' 열에는 붙이지 않는다 — 버튼 위에 '　' 라는 라벨이 뜨면 그게 더 이상하다.
   return `<tr>
-    <td><a class="game-button" href="${escape(game.path)}">${image}<span class="game-text"><strong>${escape(game.title)}</strong><small>${escape(game.genres.slice(0, 2).join(' · ') || 'Steam 게임')}</small></span></a></td>
-    <td class="numeric price-column">${price}</td>
-    <td class="numeric">${review}</td>
-    <td class="numeric">${Number.isFinite(game.players) ? `<span class="player-number">${fmt(game.players)}</span>` : '<span class="missing">차트 밖</span>'}</td>
-    <td class="numeric"><button class="button remove" data-remove="${game.appid}" aria-label="${escape(game.title)} 위시리스트에서 빼기">빼기</button></td>
+    <td class="game-cell"><a class="game-button" href="${escape(game.path)}">${image}<span class="game-text"><strong>${escape(game.title)}</strong><small>${escape(game.genres.slice(0, 2).join(' · ') || 'Steam 게임')}</small></span></a></td>
+    <td class="numeric price-column" data-label="현재 가격">${price}</td>
+    <td class="numeric" data-label="Steam 평가">${review}</td>
+    <td class="numeric" data-label="현재 동접">${Number.isFinite(game.players) ? `<span class="player-number">${fmt(game.players)}</span>` : '<span class="missing">차트 밖</span>'}</td>
+    <td class="numeric action-cell"><button class="button remove" data-remove="${game.appid}" aria-label="${escape(game.title)} 위시리스트에서 빼기">빼기</button></td>
   </tr>`;
 }
 
