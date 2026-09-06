@@ -81,6 +81,10 @@
       "destination": "/api/page?route=release&year=:year"
     },
     {
+      "source": "/status",
+      "destination": "/api/page?route=status"
+    },
+    {
       "source": "/watchlist",
       "destination": "/api/page?route=watchlist"
     },

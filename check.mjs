@@ -41,14 +41,18 @@ try {
     initialPrice: 3000000, discount: i === 1 ? 0 : 50, isFree: i === 1 ? null : false,
     playersAt: updatedAt, priceAt: updatedAt, reviewsAt: updatedAt,
     // 순위 변동 세 갈래를 다 태운다 — 오름 · 내림 · 비교할 기록 없음(NEW).
+    // '오늘의 변화' 타일 셋이 서로 다른 게임을 가리키도록 값을 흩어 놓는다.
+    // 셋이 같은 게임을 가리키면 첫 화면 게임 수 검사가 통과해도 아무것도 증명하지 못한다.
+    //   i=4  -> 가장 많이 오른 게임    i=2 -> NEW    i=6 -> 오늘 시작된 할인
     change: i === 2 ? null : {
       since: '2026-09-05',
-      rankChange: i % 2 === 0 ? 3 : -1,
-      prevRank: i + 1 + (i % 2 === 0 ? 3 : -1),
+      rankChange: i === 4 ? 9 : i % 2 === 0 ? 3 : -1,
+      prevRank: i + 1 + (i === 4 ? 9 : i % 2 === 0 ? 3 : -1),
       playersChangePct: 12.5, prevAvgPlayers: 80000,
       priceChange: -500000, prevPrice: 2000000, priceChangedAt: updatedAt
     }
   }));
+  games[6].discount = 80;
   const chartJson = { games, total: 100, updatedAt, retrievedAt: updatedAt, stale: false, source: 'fixture' };
   if (!live) await page.route('**/api/games', route => route.fulfill({ json: chartJson }));
 
@@ -124,26 +128,31 @@ try {
       const rect = a.getBoundingClientRect();
       if (rect.top < innerHeight && rect.bottom > 0 && rect.width > 0) seen.add(a.getAttribute('href'));
     }
-    const rows = seen.size;
+    const games = seen.size;
     const scrollers = [...document.querySelectorAll('.table-scroll')]
       .map(el => ({ scroll: el.scrollWidth, client: el.clientWidth }));
     return {
       overflow: document.documentElement.scrollWidth - innerWidth,
       navHeight: Math.round(document.querySelector('.site-header nav')?.getBoundingClientRect().height ?? 0),
       nav,
-      rowsInFirstScreen: rows,
+      gamesInFirstScreen: games,
       scrollers
     };
   });
 
+  // minGames 는 **서로 다른** 게임 수다. 스포트라이트와 표 첫 줄은 같은 게임이라
+  // 중복을 세면 숫자만 커지고 화면은 그대로다. 기준은 docs/PRODUCT.md §2-2.
   const widths = [
-    { width: 390, height: 844, name: 'mobile', minRows: 3, cards: true },
-    { width: 768, height: 1024, name: 'tablet', minRows: 3, cards: false },
-    { width: 1440, height: 1000, name: 'desktop', minRows: 6, cards: false }
+    { width: 390, height: 844, name: 'mobile', minGames: 3, cards: true },
+    { width: 768, height: 1024, name: 'tablet', minGames: 3, cards: false },
+    { width: 1440, height: 1000, name: 'desktop', minGames: 6, cards: false }
   ];
   const viewportReport = [];
   for (const size of widths) {
     await page.setViewportSize({ width: size.width, height: size.height });
+    // '첫 화면'은 페이지 맨 위다. 앞의 페이지네이션 검사가 #ranking 으로 스크롤해 두므로
+    // 여기서 되돌리지 않으면 목록 중간을 첫 화면이라고 재게 된다.
+    await page.evaluate(() => scrollTo(0, 0));
     await page.waitForTimeout(120); // 리플로우가 끝난 뒤에 잰다
     const m = await measure();
     const at = `${size.width}px`;
@@ -158,8 +167,8 @@ try {
       assert.ok(item.h >= 30, `${at}: 내비 '${item.text}' 의 터치 목표가 ${item.h}px 로 너무 작다`);
     }
     assert.ok(m.navHeight <= 96, `${at}: 내비 줄이 ${m.navHeight}px 다 — 두 줄로 접힌 것으로 보인다`);
-    assert.ok(m.rowsInFirstScreen >= size.minRows,
-      `${at}: 첫 화면에 게임이 ${m.rowsInFirstScreen}개뿐이다 (기준 ${size.minRows}개)`);
+    assert.ok(m.gamesInFirstScreen >= size.minGames,
+      `${at}: 첫 화면에 서로 다른 게임이 ${m.gamesInFirstScreen}개뿐이다 (기준 ${size.minGames}개)`);
     if (size.cards) {
       // 390px 에서는 표가 카드로 바뀌므로 가로 스크롤이 남아 있으면 안 된다.
       // 가로로 미루는 것은 통과가 아니다 — 밀린 열은 없는 것과 같다.
@@ -169,7 +178,7 @@ try {
     }
 
     await page.screenshot({ path: `screenshots/${live ? 'live' : 'test'}-${size.name}.png`, fullPage: true });
-    viewportReport.push(`${at} ok (내비 ${m.navHeight}px · 첫 화면 ${m.rowsInFirstScreen}행)`);
+    viewportReport.push(`${at} ok (내비 ${m.navHeight}px · 첫 화면 게임 ${m.gamesInFirstScreen}개)`);
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
 

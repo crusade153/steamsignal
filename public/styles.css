@@ -10,7 +10,7 @@
      1. 토큰            :root
      2. 리셋 · 공통     * · body · .button · .notice
      3. 헤더 · 내비     .site-header
-     4. 홈 상단         .intro · .spotlight · .market-strip
+     4. 홈 상단         .intro · .spotlight · .change-strip
      5. 표              table · .table-scroll · 셀 조각들
      6. 홈 하단         .insights · .methodology · .site-footer
      7. 반응형          @media — 1500 / 1100 / 900 / 720
@@ -229,7 +229,7 @@ button{
   align-items:flex-end;
   justify-content:space-between;
   gap:20px;
-  padding:43px 0 29px
+  padding:28px 0 18px
 }
 .eyebrow{
   font-size:11px;
@@ -250,11 +250,11 @@ button{
   box-shadow:0 0 0 4px #c3f5680c
 }
 .intro h1{
-  font-size:clamp(28px,3vw,40px);
-  line-height:1.35;
-  letter-spacing:-1.8px;
+  font-size:clamp(27px,2.6vw,35px);
+  line-height:1.3;
+  letter-spacing:-1.6px;
   font-weight:730;
-  margin:12px 0 10px
+  margin:10px 0 8px
 }
 .intro h1 span{
   color:var(--lime)
@@ -308,7 +308,7 @@ button{
 .spotlight{
   position:relative;
   isolation:isolate;
-  min-height:224px;
+  min-height:170px;
   border:1px solid #ffffff15;
   border-radius:var(--radius);
   overflow:hidden;
@@ -390,7 +390,7 @@ button{
   letter-spacing:-.6px;
   line-height:1.25;
   max-width:94%;
-  margin:31px 0 10px;
+  margin:22px 0 8px;
   text-wrap:balance
 }
 .spotlight-stats{
@@ -418,44 +418,12 @@ button{
   color:var(--muted);
   background:var(--surface)
 }
-.market-strip{
-  display:flex;
-  align-items:center;
-  gap:36px;
-  margin:20px 0 42px;
-  padding:15px 0;
-  border-top:1px solid var(--line);
-  border-bottom:1px solid var(--line);
-  font-size:13px;
-  color:var(--muted)
-}
-.market-strip>div{
-  display:flex;
-  align-items:center;
-  gap:12px
-}
-.market-strip>div:first-child{
-  margin-right:auto
-}
-.market-strip strong{
-  font-size:19px;
-  color:var(--text);
-  font-variant-numeric:tabular-nums
-}
-.market-strip b{
-  font-weight:500
-}
-.strip-label{
-  font-size:10px;
-  letter-spacing:1px;
-  color:#7c897c
-}
 .section-heading{
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:16px;
-  margin-bottom:20px
+  margin-bottom:var(--gap-3)
 }
 .title-group{
   display:flex;
@@ -535,7 +503,7 @@ button{
   display:flex;
   justify-content:space-between;
   gap:20px;
-  min-height:43px;
+  min-height:30px;
   align-items:center;
   font-size:12px;
   color:var(--muted)
@@ -576,11 +544,11 @@ th{
   text-align:left
 }
 td{
-  padding:16px;
-  border-top:1px solid #29302a;
+  padding:12px 16px;
+  border-top:1px solid var(--line-soft);
   font-size:14px;
   vertical-align:middle;
-  height:91px
+  height:72px
 }
 tbody tr{
   transition:background .15s
@@ -706,6 +674,31 @@ tbody tr:hover{
 .peak-number{
   color:#adb7aa
 }
+/* 목록 행의 7일 미니 차트. 축도 눈금도 없다 — 모양만 있으면 되고,
+   숫자는 옆 칸에 이미 있다. 오르면 라임, 내리면 무채색이다(색을 늘리지 않는다). */
+.spark-column{
+  width:88px
+}
+.spark-cell{
+  text-align:right
+}
+.spark{
+  width:72px;
+  height:24px;
+  display:inline-block;
+  overflow:visible
+}
+.spark path{
+  fill:none;
+  stroke:#7f8c7c;
+  stroke-width:1.6;
+  stroke-linejoin:round;
+  stroke-linecap:round;
+  vector-effect:non-scaling-stroke
+}
+.spark.up path{
+  stroke:var(--lime)
+}
 .review-score{
   color:var(--lime);
   font-weight:650
@@ -826,6 +819,75 @@ tbody tr:hover{
 .insights{
   margin-top:27px;
   padding-bottom:47px
+}
+/* '오늘의 변화'. 홈 위쪽에 있으므로 한 줄짜리 타일이다 —
+   여기가 세로로 길어지면 정작 순위표가 첫 화면 밖으로 밀려난다. */
+.change-strip{
+  margin-top:var(--gap-3);
+  padding-bottom:0
+}
+.change-strip .section-heading{
+  margin-bottom:var(--gap-2)
+}
+.change-cards{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:var(--gap-2)
+}
+.change-tile{
+  position:relative;
+  display:block;
+  padding:12px 34px 12px 15px;
+  border:1px solid var(--line);
+  border-radius:11px;
+  background:var(--surface);
+  min-width:0
+}
+.change-tile:hover{
+  border-color:var(--lime-glow)
+}
+.change-tile.is-empty{
+  padding-right:15px
+}
+.change-label{
+  display:block;
+  font-size:10px;
+  letter-spacing:.9px;
+  font-weight:700;
+  color:var(--lime);
+  margin-bottom:5px
+}
+.change-tile strong{
+  display:block;
+  font-size:14px;
+  font-weight:650;
+  line-height:1.4;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.change-note{
+  display:block;
+  margin-top:3px;
+  font-size:12px;
+  color:var(--muted);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.change-note .move{
+  display:inline;
+  margin:0 3px 0 0
+}
+.change-arrow{
+  position:absolute;
+  right:14px;
+  top:50%;
+  transform:translateY(-50%);
+  color:var(--muted)
+}
+.change-tile:hover .change-arrow,.change-tile:hover strong{
+  color:var(--lime)
 }
 .small-arrow{
   color:var(--lime);
@@ -993,12 +1055,6 @@ tbody tr:hover{
     gap:35px;
     grid-template-columns:1fr 1.7fr
   }
-  .market-strip{
-    gap:24px
-  }
-  .market-strip>div:last-child{
-    display:none
-  }
   .section-note{
     font-size:12px
   }
@@ -1096,24 +1152,6 @@ tbody tr:hover{
   .spotlight-arrow{
     width:25px;
     height:25px
-  }
-  .market-strip{
-    margin:17px 0 29px;
-    gap:8px;
-    padding:12px 0
-  }
-  .market-strip>div:not(:first-child){
-    display:none
-  }
-  .market-strip>div:first-child{
-    width:100%;
-    font-size:12px;
-    gap:9px;
-    margin:0
-  }
-  .market-strip strong{
-    margin-left:auto;
-    font-size:18px
   }
   .section-heading{
     margin-bottom:15px;
@@ -1316,9 +1354,6 @@ tbody tr:hover{
   .spotlight h2{
     margin-top:18px
   }
-  .market-strip{
-    margin:12px 0 20px
-  }
 
   /* 표를 카드로 바꾼다.
      가로 스크롤로 미루는 것은 통과가 아니다 — 발매일·평가·가격이 첫 화면 밖에 있으면
@@ -1390,6 +1425,14 @@ tbody tr:hover{
   .game-image{
     width:84px;
     height:40px
+  }
+  /* 카드에서는 스파크라인이 칸 폭을 다 쓴다. 오른쪽 정렬은 표에서만 의미가 있다. */
+  td.spark-cell{
+    text-align:left
+  }
+  .spark{
+    width:100%;
+    height:28px
   }
   .game-text strong{
     font-size:14px;

@@ -54,8 +54,68 @@ function renderSpotlights() {
   $('#spotlights').innerHTML = state.games.slice(0, 3).map((game, i) => `<a class="spotlight" href="${escape(game.path)}">
     ${game.headerImage ? `<img src="${escape(game.headerImage)}" alt="" referrerpolicy="no-referrer">` : ''}<div class="spotlight-top"><span class="spotlight-tag">${i === 0 ? '● HOT RIGHT NOW' : `MOST PLAYED / 0${i + 1}`}</span><span class="spotlight-arrow" aria-hidden="true">↗</span></div>
     <div><h2>${escape(game.title)}</h2><div class="spotlight-stats"><strong>${fmt(game.players)}</strong><span>명 플레이 중</span></div></div><span class="spotlight-rank" aria-hidden="true">0${i + 1}</span></a>`).join('');
-  $('#totalGames').textContent = state.games.length;
-  $('#totalPlayers').textContent = `${fmt(state.games.reduce((sum, game) => sum + (game.players ?? 0), 0))}명`;
+  // 합계는 순위표 제목 옆 한 줄로 붙인다. 예전에는 이것만을 위한 띠가 따로 있었는데,
+  // 그 띠가 첫 화면에서 60px 넘게 차지하면서 정작 게임을 밀어냈다.
+  const total = state.games.reduce((sum, game) => sum + (game.players ?? 0), 0);
+  const summary = $('#chartSummary');
+  if (summary) summary.textContent = `TOP ${state.games.length} · 지금 ${fmt(total)}명이 플레이 중`;
+}
+
+// '오늘의 변화'. 홈이 TOP 100 순위표뿐이면 어제와 오늘이 거의 같아서 다시 올 이유가 없다.
+// 순위표는 그대로 두고, **달라진 것만** 위로 끌어올린다(docs/PRODUCT.md §3).
+//
+// 계산은 전부 이미 받아 온 목록 안에서 한다. 서버에 질문을 하나 더 만들면
+// 홈이 느려지는 대신 얻는 게 없다 — 필요한 값(change)이 이미 각 행에 붙어 있다.
+function renderChanges() {
+  const section = $('#todayChanges');
+  if (!section) return;
+  if (!state.games.length) { section.hidden = true; return; }
+
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date());
+  const climbers = state.games
+    .filter(game => Number.isFinite(game.change?.rankChange) && game.change.rankChange > 0)
+    .sort((a, b) => b.change.rankChange - a.change.rankChange);
+  const newcomers = state.games.filter(game => !game.change || !Number.isFinite(game.change.rankChange));
+  // '오늘 시작된 할인'은 가격이 바뀐 시각이 오늘(KST)인 것만이다.
+  // 지금 할인 중인 것 전부를 여기 쓰면 어제와 같은 목록이 되어 '변화'가 아니게 된다.
+  const fresh = state.games.filter(game =>
+    game.discount > 0 && game.change?.priceChangedAt
+    && new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date(game.change.priceChangedAt)) === today)
+    .sort((a, b) => b.discount - a.discount);
+
+  // 큰 카드가 아니라 한 줄짜리 타일이다. 이 구역이 세로로 길어지면 정작 순위표가
+  // 첫 화면 밖으로 밀려난다 — '오늘의 변화'를 보여 주려다 게임을 안 보이게 하는 셈이다.
+  const tile = (label, headline, note, href) => {
+    const inner = `<span class="change-label">${label}</span>` +
+      `<strong>${escape(headline)}</strong><span class="change-note">${note}</span>`;
+    return href
+      ? `<a class="change-tile" href="${escape(href)}">${inner}<span class="change-arrow" aria-hidden="true">→</span></a>`
+      : `<div class="change-tile is-empty">${inner}</div>`;
+  };
+
+  const top = climbers[0];
+  const deal = fresh[0];
+  section.hidden = false;
+  section.querySelector('.change-cards').innerHTML = [
+    tile('BIGGEST CLIMB',
+      top ? top.title : '아직 움직인 순위가 없습니다',
+      top
+        ? `<span class="move up">▲${top.change.rankChange}</span> ${top.change.prevRank}위 → ${top.rank}위${climbers.length > 1 ? ` · 오른 게임 ${climbers.length}개` : ''}`
+        : `${escape('어제 기록이 쌓이면 여기에 나옵니다')}`,
+      top?.path),
+    tile('NEW IN THE CHART',
+      newcomers.length ? `${newcomers.length}개 게임이 새로 보입니다` : '새로 들어온 게임 없음',
+      newcomers.length
+        ? escape(`${newcomers.slice(0, 2).map(game => game.title).join(', ')}${newcomers.length > 2 ? ' 외' : ''}`)
+        : escape('지금 순위의 게임은 모두 어제도 있었습니다'),
+      newcomers[0]?.path),
+    tile('DISCOUNT STARTED TODAY',
+      deal ? deal.title : '오늘 시작된 할인 없음',
+      deal
+        ? `<span class="discount">-${deal.discount}%</span> ${escape(deal.priceFormatted || '')}${fresh.length > 1 ? ` · 오늘 ${fresh.length}개` : ''}`
+        : escape('가격이 바뀌면 그 시각을 기록합니다'),
+      deal ? deal.path : null)
+  ].join('');
 }
 
 function renderNotices() {
@@ -68,6 +128,26 @@ function renderNotices() {
 
 // 결측은 0 이 아니다. 아직 수집이 그 게임 차례에 닿지 않았다는 뜻으로 적는다.
 const pending = label => `<span class="missing">${label}</span>`;
+
+// 열 이름은 서버가 정한다. 적재 초기에는 일 롤업이 얇아 시간 롤업으로 내려가는데,
+// 그때도 '7일 추이'라고 써 두면 48시간을 7일이라고 부르는 셈이 된다.
+const sparkLabel = () => state.chart?.sparkLabel || '7일 추이';
+
+// 목록 행의 미니 차트. lib/render.mjs 의 sparkline() 과 같은 규칙이다 —
+// 표본이 셋 미만이면 그리지 않는다. 두 점을 이으면 무조건 직선이 나오는데
+// 그 직선은 추세처럼 보이면서 아무것도 말해 주지 않는다.
+function spark(game) {
+  const points = (game.spark || []).filter(Number.isFinite);
+  if (points.length < 3) return pending('표본 부족');
+  const max = Math.max(...points);
+  const min = Math.min(...points);
+  const span = Math.max(max - min, 1);
+  const path = points.map((value, i) =>
+    `${i ? 'L' : 'M'}${((i / (points.length - 1)) * 100).toFixed(1)} ${(100 - ((value - min) / span) * 100).toFixed(1)}`).join(' ');
+  const rising = points[points.length - 1] >= points[0];
+  const label = `${game.title} ${sparkLabel()} · 표본 ${points.length}개`;
+  return `<svg class="spark ${rising ? 'up' : 'down'}" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="${escape(label)}"><path d="${path}"/></svg>`;
+}
 
 // 순위 변동 칩. 목록에서 가장 값싼 재방문 장치다 — 어제와 오늘이 다르다는 걸
 // 한 글자로 말해 준다(docs/PRODUCT.md §3).
@@ -98,10 +178,11 @@ function renderTable() {
     <td class="game-cell"><a class="game-button" href="${escape(game.path)}">${imageMarkup(game)}<span class="game-text"><strong>${escape(game.title)}</strong><small>${escape(game.genres.slice(0, 2).join(' · ') || '인기 차트')}</small></span></a></td>
     <td class="numeric" data-label="현재 플레이어"><span class="player-number">${fmt(game.players)}</span><div class="player-track" aria-hidden="true"><i style="width:${Math.max(2, Math.min(100, (game.players || 0) / maxPlayers * 100))}%"></i></div></td>
     <td class="numeric peak-number" data-label="오늘 최고">${fmt(game.peakToday)}</td>
+    <td class="spark-cell" data-label="${escape(sparkLabel())}">${spark(game)}</td>
     <td class="numeric" data-label="Steam 평가">${Number.isFinite(game.positiveRatio) ? `<span class="review-score ${scoreClass(game.positiveRatio)}">${game.positiveRatio}%</span><span class="cell-sub">${fmt(game.reviewTotal)}개 리뷰</span>` : pending('집계 전')}</td>
     <td class="numeric" data-label="메타크리틱">${game.metacritic ? `<span class="meta-score ${scoreClass(game.metacritic.score, true)}">${game.metacritic.score}</span>` : pending('미제공')}</td>
     <td class="numeric price-column" data-label="현재 가격">${game.priceFormatted ? `<span class="price-value ${game.isFree ? 'free' : ''}">${escape(game.priceFormatted)}</span>${game.discount > 0 ? `<span class="cell-sub"><span class="discount">-${game.discount}%</span></span>` : ''}` : pending('가격 미확인')}</td>
-  </tr>`).join('') : `<tr><td colspan="7" class="empty">${state.loading && !state.games.length ? '인기 순위를 불러오는 중입니다…' : state.error && !state.games.length ? '순위를 불러오지 못했습니다. 새로고침으로 다시 시도해 주세요.' : '검색에 맞는 게임이 없습니다. TOP 100 안에서 이름이나 게임 ID로 검색해 보세요.'}${state.query ? '<br><button class="button" data-reset-search>검색 초기화</button>' : ''}</td></tr>`;
+  </tr>`).join('') : `<tr><td colspan="8" class="empty">${state.loading && !state.games.length ? '인기 순위를 불러오는 중입니다…' : state.error && !state.games.length ? '순위를 불러오지 못했습니다. 새로고침으로 다시 시도해 주세요.' : '검색에 맞는 게임이 없습니다. TOP 100 안에서 이름이나 게임 ID로 검색해 보세요.'}${state.query ? '<br><button class="button" data-reset-search>검색 초기화</button>' : ''}</td></tr>`;
 
   $('#resultCount').textContent = all.length ? `${all.length}개 게임 · ${(state.page - 1) * pageSize + 1}–${Math.min(state.page * pageSize, all.length)} 표시` : state.loading ? '순위 확인 중' : '0개 게임';
   const missing = games.filter(game => !Number.isFinite(game.positiveRatio) || !game.priceFormatted).length;
@@ -138,9 +219,12 @@ async function loadChart() {
     if (!response.ok) throw new Error(payload.error || '데이터를 불러오지 못했습니다.');
     if (!Array.isArray(payload.games) || !payload.games.length) throw new Error('순위 응답에 게임이 없습니다.');
     state.chart = payload; state.games = payload.games; state.error = '';
+    const sparkHead = document.querySelector('.spark-column');
+    if (sparkHead) sparkHead.textContent = sparkLabel();
     $('#updatedAt').textContent = `${clock(payload.updatedAt)} KST 기준`;
     $('#updatedAt').title = `서버 수신: ${clock(payload.retrievedAt)} KST`;
     renderSpotlights();
+    renderChanges();
   } catch (error) {
     state.error = error.name === 'TimeoutError' ? '응답이 지연됩니다. 잠시 후 다시 시도해 주세요.' : error.message;
     if (!state.games.length) { $('#spotlights').hidden = true; $('#updatedAt').textContent = '연결 확인 필요'; }

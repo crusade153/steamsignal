@@ -230,7 +230,9 @@ test('급상승은 결과가 나오는 창까지 좁히고 실제로 쓴 창을 
   }));
   let attempt = 0;
   const sql = strings => {
-    if (strings.join(' ').includes('player_hourly')) return Promise.resolve(++attempt >= 3 ? rows : []);
+    // 급상승 쿼리만 센다. player_hourly 는 스파크라인도 읽으므로 테이블 이름으로 세면
+    // 창을 좁힌 횟수가 아니라 '그 테이블을 몇 번 봤나'를 세게 된다.
+    if (strings.join(' ').includes('WITH recent AS')) return Promise.resolve(++attempt >= 3 ? rows : []);
     return Promise.resolve([]);
   };
   const { body } = await risingPage(sql);
