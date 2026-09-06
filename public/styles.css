@@ -755,6 +755,10 @@ tbody tr:hover{
 .review-score.negative{
   color:var(--red)
 }
+.review-column{
+  min-width:112px;
+  white-space:nowrap
+}
 .cell-sub{
   display:block;
   font-size:11px;

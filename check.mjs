@@ -175,6 +175,12 @@ try {
     assert.ok(m.navHeight <= 96, `${at}: 내비 줄이 ${m.navHeight}px 다 — 두 줄로 접힌 것으로 보인다`);
     assert.ok(m.gamesInFirstScreen >= size.minGames,
       `${at}: 첫 화면에 서로 다른 게임이 ${m.gamesInFirstScreen}개뿐이다 (기준 ${size.minGames}개)`);
+    const reviewLines = await page.locator('.game-row .review-column .cell-sub').first().evaluate(el => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return range.getClientRects().length;
+    });
+    assert.equal(reviewLines, 1, `${at}: Steam 리뷰 수가 ${reviewLines}줄로 접혔다`);
     if (size.cards) {
       // 390px 에서는 표가 카드로 바뀌므로 가로 스크롤이 남아 있으면 안 된다.
       // 가로로 미루는 것은 통과가 아니다 — 밀린 열은 없는 것과 같다.
