@@ -33,6 +33,7 @@ on:
     - cron: '19,49 * * * *'              # 가격 하락 알림 메일 (30분 간격)
     - cron: '23 0 * * 1'                 # 주간 리포트 메일 (월요일 09:23 KST)
     - cron: '7 */2 * * *'                # 파이프라인 감시 (2시간 간격)
+    - cron: '53 19 * * *'                # 로스터 확장 (04:53 KST)
   workflow_dispatch:
     inputs:
       jobs:
@@ -62,6 +63,7 @@ jobs:
             '19,49 * * * *')              jobs='alerts' ;;
             '23 0 * * 1')                 jobs='newsletter' ;;
             '7 */2 * * *')                jobs='watchdog' ;;
+            '53 19 * * *')                jobs='discover' ;;
             *)                            jobs='${{ inputs.jobs }}' ;;
           esac
           echo "jobs=${jobs:-chart,details}" >> "$GITHUB_OUTPUT"

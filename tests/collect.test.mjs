@@ -185,3 +185,84 @@ test('감시 잡은 아무것도 쓰지 않는다', async () => {
   assert.equal(result.healthy, true);
   assert.deepEqual(writes, [], '감시는 읽기만 한다');
 });
+
+// --- 커버리지 200개 ----------------------------------------------------------
+
+test('차트 밖 게임의 동접을 같은 captured_at 으로 찍고 순위는 지어내지 않는다', async () => {
+  // Steam 차트는 100개만 준다. 그 밖의 게임은 appid 하나씩 직접 물어야 하고,
+  // 그러지 않으면 100위 밖으로 내려간 순간 시계열이 끊긴다.
+  const sql = fakeSql({ targets: [{ appid: 4000 }, { appid: 5000 }], snapshots: [{ appid: 4000 }] });
+  const collector = createCollector({
+    sql,
+    steam: { getChart: async () => chart },
+    // 5000 은 result 가 1 이 아니다 — 값이 아니므로 저장하지 않는다.
+    fetcher: async url => (url.includes('appid=4000')
+      ? Response.json({ response: { player_count: 1234, result: 1 } })
+      : Response.json({ response: { result: 42 } }))
+  });
+
+  const result = await collector.run('chart');
+  assert.equal(result.charted, 2);
+  assert.equal(result.offChart, 1);
+  assert.equal(result.offChartFailed, 1);
+
+  const extra = sql.find('INSERT INTO player_snapshots')[1];
+  // 시각이 차트와 어긋나면 롤업이 같은 10분을 두 버킷에 나눠 담는다.
+  assert.ok(extra.values.includes(chart.updatedAt), '차트와 같은 captured_at 을 써야 한다');
+  assert.deepEqual(JSON.parse(extra.values.find(v => typeof v === 'string' && v.startsWith('['))),
+    [{ appid: 4000, players: 1234 }]);
+
+  // 차트 밖 게임에 순위를 적으면 그건 우리가 지어낸 값이다.
+  const stats = sql.find('INSERT INTO app_stats (appid, players, players_at)')[0];
+  assert.ok(!stats.text.includes('rank'), '차트 밖 갱신은 rank 를 건드리지 않는다');
+});
+
+test('로스터가 목표에 닿으면 후보를 더 찾지 않는다', async () => {
+  let fetched = 0;
+  const collector = createCollector({
+    sql: strings => Promise.resolve(
+      strings.join(' ').includes('COUNT(*)::int AS tracked') ? [{ tracked: 200 }] : []),
+    steam: { getChart: async () => chart },
+    fetcher: async () => { fetched += 1; return Response.json({}); }
+  });
+
+  const result = await collector.discover();
+  assert.equal(result.skipped, 'target-reached');
+  assert.equal(fetched, 0, '목표에 닿았으면 Steam 을 한 번도 부르지 않는다');
+});
+
+test('로스터 확장은 게임이 아닌 앱을 넣지 않는다', async () => {
+  // DLC·사운드트랙이 한 번 들어오면 목록·장르·사이트맵에 전부 나타나고,
+  // 그때 빼는 것은 이미 색인된 URL 을 죽이는 일이 된다. 들어오기 전에 막는다.
+  const calls = [];
+  const sql = Object.assign((strings, ...values) => {
+    const text = strings.join(' ? ').replace(/\s+/g, ' ').trim();
+    calls.push({ text, values });
+    if (text.includes('COUNT(*)::int AS tracked')) return Promise.resolve([{ tracked: 118 }]);
+    if (text.includes('COUNT(*)::int AS total')) return Promise.resolve([{ total: 120 }]);
+    if (text.startsWith('INSERT INTO collector_runs')) return Promise.resolve([{ id: 1 }]);
+    if (text.startsWith('SELECT appid FROM apps WHERE appid = ANY')) return Promise.resolve([{ appid: 730 }]);
+    return Promise.resolve([]);
+  }, {});
+
+  const types = { 730: 'game', 900: 'game', 901: 'dlc', 902: 'music' };
+  const collector = createCollector({
+    sql,
+    steam: { getChart: async () => chart },
+    fetcher: async url => {
+      if (url.includes('/search/results/')) {
+        return Response.json({ results_html: [730, 900, 901, 902].map(id => `<a data-ds-appid="${id}"></a>`).join('') });
+      }
+      const appid = Number(url.match(/appids=(\d+)/)[1]);
+      return Response.json({ [appid]: { success: true, data: { name: `게임 ${appid}`, type: types[appid], is_free: true } } });
+    }
+  });
+
+  const result = await collector.discover({ pages: 1 });
+  assert.equal(result.processed, 1, '이미 있는 730 은 다시 확인하지 않고, dlc·music 은 넣지 않는다');
+
+  const insert = calls.find(call => call.text.startsWith('INSERT INTO apps'));
+  const rows = JSON.parse(insert.values.find(v => typeof v === 'string' && v.startsWith('[')));
+  assert.deepEqual(rows.map(row => row.appid), [900]);
+  assert.equal(rows[0].slug, '900-게임-900');
+});

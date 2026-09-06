@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSteamService, normalizeRanks, normalizeDetails, parseChartMetadata, parseIds, safeSteamImage, CHART_URL, STORE_CHART_URL } from '../lib/steam.mjs';
+import { createSteamService, normalizeRanks, normalizeDetails, parseChartMetadata, parseIds, safeSteamImage, normalizePlayerCount, parseStoreAppIds, currentPlayersUrl, topSellersUrl, CHART_URL, STORE_CHART_URL } from '../lib/steam.mjs';
 
 const ranks = Array.from({ length: 100 }, (_, i) => ({ appid: i + 1, rank: i + 1, concurrent_in_game: 10000 - i * 50, peak_in_game: 15000 - i * 50 }));
 const chartHtml = ranks.map(row => `<tr><td><a href="https://store.steampowered.com/app/${row.appid}/Game"><img src="https://shared.fastly.steamstatic.com/${row.appid}.jpg"><div>Game ${row.appid}</div></a></td></tr>`).join('');
@@ -77,4 +77,30 @@ test('concurrent page visitors never exceed eight upstream requests', async () =
   } });
   await Promise.all([service.getDetails(ranks.slice(0, 20).map(row => row.appid)), service.getDetails(ranks.slice(20, 40).map(row => row.appid))]);
   assert.ok(maximum <= 8, `maximum: ${maximum}`);
+});
+
+// --- 차트 밖 게임 추적 (커버리지 200개) ---------------------------------------
+
+test('동접 응답은 result 가 1 일 때만 값으로 인정한다', () => {
+  // result 가 1 이 아닌데 player_count 를 읽으면 0 이 들어오고, 그 0 은 화면에서
+  // '아무도 안 한다'로 읽힌다. 결측을 0 으로 만들지 않는다는 규율이 여기에도 걸린다.
+  assert.equal(normalizePlayerCount({ response: { player_count: 634241, result: 1 } }), 634241);
+  assert.equal(normalizePlayerCount({ response: { player_count: 0, result: 1 } }), 0);
+  assert.equal(normalizePlayerCount({ response: { player_count: 42, result: 42 } }), null);
+  assert.equal(normalizePlayerCount({ response: {} }), null);
+  assert.equal(normalizePlayerCount(null), null);
+  assert.match(currentPlayersUrl(730), /appid=730$/);
+});
+
+test('스토어 판매 상위에서 appid 만 뽑고 번들은 빼놓는다', () => {
+  const html = '<a data-ds-appid="730" data-ds-tagids="[1]">CS</a>' +
+    '<a data-ds-bundleid="12345">번들</a>' +
+    '<a data-ds-appid="570">Dota</a>' +
+    '<a data-ds-appid="730">중복</a>';
+  assert.deepEqual(parseStoreAppIds({ results_html: html }), [730, 570]);
+  assert.deepEqual(parseStoreAppIds({ results_html: html }, 1), [730]);
+  // 응답이 깨져도 던지지 않는다 — 이 잡이 실패하면 로스터만 안 늘어나면 된다.
+  assert.deepEqual(parseStoreAppIds(null), []);
+  assert.deepEqual(parseStoreAppIds({}), []);
+  assert.match(topSellersUrl(2), /start=100/);
 });
