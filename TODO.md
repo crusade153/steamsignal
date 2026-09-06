@@ -20,6 +20,26 @@
 - [x] **[코드] 파이프라인 감시** — `watchdog` 잡(2시간 간격). 스냅샷 지연·chart 실패·상세 실패율·
       죽은 앱 수를 보고 하나라도 걸리면 **일부러 실패한다.** cron-job.org 의 실패 알림이 메일을 보내므로
       별도 통보 설정이 필요 없다. 조건은 [docs/DATA-PIPELINE.md §7](docs/DATA-PIPELINE.md) 과 `HEALTH_LIMITS`.
+- [x] **[코드] 롤업 창을 버킷 경계로 스냅했다.** `NOW()` 에서 그냥 빼던 창이 버킷 한가운데를 잘라,
+      **시간 롤업이 매시 마지막 2표본(17분)만 담고 있었다** — 실측 평균 오차 최대 7%.
+      일 롤업도 같은 구조라 이틀 뒤부터 같은 일이 났을 것이다. `db/functions.sql` 을 고쳤고
+      `tests/rollup.test.mjs` 가 PGlite 로 실제 SQL 을 돌려 불변식을 지킨다.
+- [x] **[코드] 고친 `db/functions.sql` 을 DB 에 적용하고 롤업을 되돌렸다.** 시간 2,485행·일 302행을
+      다시 집계했고 **불일치 버킷 0개**를 확인했다. 되돌리기 전 783,087 이던 09-05 22:00 버킷이
+      실제값 842,319 로 복구됐다. 원시 보관이 7일이라 그 이전 시간 버킷은 복구되지 않는다.
+      이 PC 에는 `psql` 이 없어 `npm run db:apply` 를 새로 만들어 드라이버로 적용했다.
+
+      ```sh
+      npm run db:apply -- db/functions.sql
+      ```
+
+      확인 — `bad` 가 0 이어야 한다(저장된 표본 수 ≠ 그 버킷의 실제 원시 행 수).
+      **진행 중인 현재 시각 버킷은 반드시 빼고 센다** — 스냅샷은 10분마다 쌓이는데 롤업은 :37 에만
+      돌아서, 빼지 않으면 정상인데도 추적 게임 수만큼 불일치가 잡힌다:
+
+      ```bash
+      node --env-file=.env -e "import('./lib/db.mjs').then(async({getSql})=>{const s=getSql();console.table(await s`SELECT COUNT(*)::int AS bad FROM player_hourly h WHERE h.bucket < date_trunc('hour',NOW()) AND h.samples <> (SELECT COUNT(*) FROM player_snapshots p WHERE p.appid=h.appid AND p.captured_at>=h.bucket AND p.captured_at<h.bucket+INTERVAL '1 hour' AND p.players IS NOT NULL)`)})"
+      ```
 - [ ] **[확인] 24시간 뒤 한 번 본다.** `captured_at` 의 서로 다른 값이 **144 근처**여야 한다.
       한참 못 미치면 크론 서비스 쪽 실행 이력을 본다.
 

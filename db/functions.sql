@@ -10,6 +10,13 @@
 
 -- ---------------------------------------------------------------------------
 -- 시간 롤업. 최근 p_hours 시간만 다시 계산한다(진행 중인 버킷이 갱신되도록 겹쳐서 돌린다).
+--
+-- **창은 반드시 버킷 경계로 스냅한다.** NOW() 에서 그냥 빼면 창의 시작점이 버킷 한가운데에
+-- 떨어지고, 가장 오래된 버킷은 그 조각만으로 집계된다. ON CONFLICT DO UPDATE 가
+-- 한 시간 전에 온전히 계산해 둔 값을 그 조각으로 덮어쓰고, 다음 실행 때는 이미 창 밖이라
+-- 영영 복구되지 않는다. 실제로 이 잡이 :37 에 도는 동안 모든 버킷이
+-- 6표본이 아니라 마지막 2표본(=17분)만 담고 있었다 — 평균이 최대 7% 어긋났다.
+-- tests/rollup.test.mjs 가 이 불변식을 지킨다.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION rollup_player_hourly(p_hours INTEGER DEFAULT 3)
 RETURNS INTEGER AS $$
@@ -25,7 +32,7 @@ BEGIN
          MIN(rank)::SMALLINT,
          COUNT(*)::SMALLINT
     FROM player_snapshots
-   WHERE captured_at >= NOW() - make_interval(hours => p_hours)
+   WHERE captured_at >= date_trunc('hour', NOW() - make_interval(hours => p_hours))
      AND players IS NOT NULL
    GROUP BY appid, date_trunc('hour', captured_at)
       ON CONFLICT (appid, bucket) DO UPDATE
@@ -43,6 +50,11 @@ $$ LANGUAGE plpgsql;
 -- ---------------------------------------------------------------------------
 -- 일 롤업. KST 기준으로 자른다. 원시 스냅샷을 7일 보관하므로 기본 2일 겹치기면 충분하다.
 -- peak_reported 는 Steam 이 준 당일 최고치라 우리 샘플링이 놓친 피크까지 포함한다.
+--
+-- **창은 반드시 KST 자정으로 스냅한다.** 시간 롤업과 같은 이유다 — NOW() 에서 그냥 빼면
+-- 창의 시작점이 D-2 의 '지금 시각'에 떨어져서, 이 잡이 03:41 에 도는 동안
+-- D-2 의 00:00~03:41 이 빠진 평균이 온전한 값을 덮어쓴다. 하루가 지나면 창 밖이라
+-- 그 잘린 값이 영구 보관된다 — 일 롤업은 prune 이 지우지 않기 때문에 더욱 그렇다.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION rollup_player_daily(p_days INTEGER DEFAULT 2)
 RETURNS INTEGER AS $$
@@ -59,7 +71,8 @@ BEGIN
          MIN(rank)::SMALLINT,
          COUNT(*)::SMALLINT
     FROM player_snapshots
-   WHERE captured_at >= NOW() - make_interval(days => p_days)
+   WHERE captured_at >= ((((NOW() AT TIME ZONE 'Asia/Seoul')::DATE - p_days)::TIMESTAMP)
+                          AT TIME ZONE 'Asia/Seoul')
      AND players IS NOT NULL
    GROUP BY appid, (captured_at AT TIME ZONE 'Asia/Seoul')::DATE
       ON CONFLICT (appid, day) DO UPDATE
