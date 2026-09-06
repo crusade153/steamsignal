@@ -164,17 +164,15 @@ button{
 .brand-period{
   color:var(--lime)
 }
+/* 브랜드 마크는 favicon.svg 그대로다 — 파비콘과 헤더가 어긋나지 않게 파일 하나만 쓴다.
+   배경·색은 SVG 안에 있으므로 여기서 칠하지 않는다. flex 자식이라 flex:none 이 없으면
+   좁은 화면에서 내비에 밀려 찌그러진다(글자와 달리 이미지는 그렇게 티가 안 난다). */
 .brand-mark{
   width:33px;
   height:33px;
-  background:var(--lime);
-  color:var(--bg);
-  font-size:29px;
-  display:grid;
-  place-items:center;
   border-radius:9px;
-  font-weight:500;
-  line-height:1
+  display:block;
+  flex:none
 }
 /* 내비는 절대 줄바꿈하지 않는다. 좁아지면 가로로 스크롤한다.
    flex 자식이라 min-width:auto 가 기본이라서, min-width:0 이 없으면 줄어들지 않고
@@ -1138,8 +1136,7 @@ tbody tr:hover{
   }
   .brand-mark{
     width:29px;
-    height:29px;
-    font-size:24px
+    height:29px
   }
   .site-header nav{
     gap:18px;

@@ -6,7 +6,12 @@
 // 게임 페이지는 Steam 헤더 이미지를 쓰지만 홈과 허브 페이지에는 대표 이미지가 없다.
 // og:image 가 없으면 카카오톡·X·디스코드에 링크를 붙였을 때 그림 없이 글자만 나간다.
 // 폰트를 직접 래스터화할 방법이 없으므로 브라우저에 카드를 그려 1200x630 으로 찍는다.
+import { readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
+
+// 브랜드 마크는 파비콘·헤더와 같은 파일을 쓴다. setContent 에는 기준 URL 이 없어
+// /favicon.svg 로는 못 부르므로 data URI 로 끼워 넣는다.
+const markUri = `data:image/svg+xml;base64,${Buffer.from(await readFile('public/favicon.svg')).toString('base64')}`;
 
 const card = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap');
@@ -17,8 +22,7 @@ const card = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
   .glow{position:absolute;right:-180px;top:-180px;width:620px;height:620px;border-radius:50%;
         background:radial-gradient(circle,#c3f56826 0%,#c3f56800 70%)}
   .brand{display:flex;align-items:center;gap:16px;font-size:38px;font-weight:800;letter-spacing:-1.8px}
-  .mark{width:52px;height:52px;background:#c3f568;color:#101311;border-radius:14px;
-        display:grid;place-items:center;font-size:44px;font-weight:500;line-height:1}
+  .mark{width:52px;height:52px;border-radius:14px;display:block}
   .light{font-weight:400}
   .dot{color:#c3f568}
   h1{font-size:76px;line-height:1.22;letter-spacing:-3.4px;font-weight:800;margin:44px 0 26px;max-width:900px}
@@ -27,7 +31,7 @@ const card = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
   .strip{position:absolute;left:0;right:0;bottom:0;height:8px;background:#c3f568}
 </style></head><body>
   <div class="glow"></div>
-  <div class="brand"><span class="mark">↗</span><span>steam<span class="light">pulse</span><span class="dot">.</span></span></div>
+  <div class="brand"><img class="mark" src="${markUri}" alt=""><span>steam<span class="light">pulse</span><span class="dot">.</span></span></div>
   <h1>지금 스팀에서<br><em>가장 핫한 게임.</em></h1>
   <p>동시접속자 · 유저 평가 · 한국 가격을 10분마다 기록해 추이로 보여 줍니다.</p>
   <div class="strip"></div>

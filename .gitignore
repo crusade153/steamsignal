@@ -9,3 +9,6 @@ test-results/
 .DS_Store
 .vercel
 .env*.local
+
+# 에이전트 작업용 워크트리(저장소 복사본). .claude/launch.json 은 공유해도 된다.
+.claude/worktrees/
