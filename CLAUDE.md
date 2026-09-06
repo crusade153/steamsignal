@@ -4,6 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Steam Pulse — Steam 동시접속자·평가·한국 가격을 10분마다 적재하고 그 자체 시계열로 페이지를 만드는 사이트.
 Node 22+ / ESM(`type: module`) / 런타임 의존성은 `@neondatabase/serverless` 하나. 빌드 도구·프레임워크 없음.
+테스트에만 `playwright`(e2e)와 `@electric-sql/pglite`(내장 Postgres 로 `db/*.sql` 을 실제 실행)를 쓴다.
 문서와 주석은 한국어다. 커밋 메시지도 한국어 서술형(`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`)으로 쓴다.
 
 ## 명령어
@@ -12,12 +13,16 @@ Node 22+ / ESM(`type: module`) / 런타임 의존성은 `@neondatabase/serverles
 npm run dev            # 로컬 서버 (--watch), http://127.0.0.1:5174, PORT 로 변경 가능
 npm run build          # 문법 검사 + vercel.json↔routes 대조 + collect.yml cron 대조 (아래 참고)
 npm test               # 단위 테스트 (node --test tests/*.test.mjs)
+node --test tests/rollup.test.mjs                      # db/*.sql 을 PGlite(내장 Postgres)로 실제 실행
 node --test tests/pages.test.mjs                       # 파일 하나만
 node --test --test-name-pattern '급상승' tests/pages.test.mjs   # 케이스 하나만
 npm run test:e2e       # playwright e2e. /api/games 를 픽스처로 가로채므로 DB 불필요
 TEST_URL=https://steamsignal.vercel.app node check.mjs --live   # 배포를 직접 검증(SSR·사이트맵·구조화 데이터)
 npm run collect -- chart details    # 수동 수집. 잡: chart details rollup-hourly rollup-daily prune
 npm run db:migrate     # DATABASE_URL_DIRECT(pooler 아님)로 schema.sql + functions.sql 적용
+npm run db:apply       # psql 이 없을 때. DATABASE_URL 로 같은 파일을 드라이버로 적용
+npm run db:apply -- db/functions.sql          # 한 파일만
+node scripts/og-image.mjs                     # 브랜드 마크를 바꾸면 og-cover.png 도 다시 뽑는다
 ```
 
 e2e 는 처음 한 번 `npx playwright install chromium` 이 필요하다.
@@ -112,6 +117,20 @@ cron-job.org(주) + GitHub Actions(예비) → /api/cron → lib/collect.mjs →
     일치하는 블록을 읽어 `DATE`로 저장한다. 에디션·번들 날짜를 붙이지 않고, 정확한 시각도 추정하지 않는다.
 22. **메일 관련 테스트는 동적 import 를 쓴다.** 설정은 모듈 로드 시점에 `config.mail` 로 굳는데
     ESM 의 `import` 는 파일 첫 줄보다 먼저 실행돼서, `process.env` 를 위에 적어도 늦는다.
+23. **롤업 창은 버킷 경계로 스냅한다.** `NOW()` 에서 그냥 빼면 창의 시작점이 버킷 한가운데에
+    떨어져 가장 오래된 버킷이 조각만으로 집계되고, `ON CONFLICT DO UPDATE` 가 온전한 값을
+    그 조각으로 덮는다. 다음 실행 때는 창 밖이라 **영영 복구되지 않는다.**
+    실제로 시간 롤업이 매시 마지막 2표본(17분)만 담아 평균이 7% 어긋난 채 며칠을 돌았다.
+    시간은 `date_trunc('hour', ...)`, 일은 KST 자정으로 자른다. 불변식은 하나다 —
+    **롤업이 쓴 버킷은 그 버킷의 원시 스냅샷 전부를 요약한 값이어야 한다.**
+24. **`db/*.sql` 을 고치면 마이그레이션이 반드시 따라온다.** 그 파일들은 저절로 실행되지 않고,
+    테스트는 통과하는데 화면의 숫자만 틀린 상태가 만들어진다. `psql` 이 없는 환경에서는
+    `npm run db:apply` 가 드라이버로 같은 일을 한다(전부 `IF NOT EXISTS`/`OR REPLACE` 라 반복 적용이 안전하다).
+    적용 뒤 **테이블 14개 · 함수 6개**를 대조한다. 기록은 [HANDOFF §3-2](HANDOFF.md)·[§3-3](HANDOFF.md).
+25. **브랜드 마크는 `public/favicon.svg` 하나다.** 파비콘과 헤더(`lib/render.mjs`·`public/index.html`)가
+    그 파일을 직접 참조하므로 고치면 함께 바뀐다. **`og-cover.png` 만 예외로 생성물이라
+    `node scripts/og-image.mjs` 를 다시 돌려야 한다** — 안 돌리면 링크 공유 카드에만 옛 마크가 남는다.
+    그리고 SVG 안에서는 XML 주석에 하이픈 두 개를 못 쓴다(CSS 변수명을 그대로 적으면 파싱이 깨진다).
 
 ## 환경변수
 
