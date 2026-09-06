@@ -43,8 +43,11 @@ GitHub Actions(10분마다 curl 1회) → /api/cron → lib/collect.mjs → Stea
 `lib/routes.mjs`(경로 정의) → `lib/pages.mjs`(본문, `{status, headers, body}` 만 반환하고 HTTP 를 모름)
 → `lib/queries.mjs`(읽기 전용 SQL) / `lib/render.mjs`(레이아웃·포맷터·인라인 SVG 차트, DB 도 Steam 도 모름).
 법적 고정 문서는 `lib/legal.mjs`. 수집은 `lib/collect.mjs`(잡 8종, `watchdog` 포함) + `lib/steam.mjs`(수집·검증·동시성) + `lib/db.mjs`.
-이메일 알림은 `lib/alerts.mjs`(구독 SQL, **사용자 요청 경로에서 쓰기를 하는 유일한 파일**)
-+ `lib/mail.mjs`(Resend 발송·템플릿) + `lib/http.mjs` 의 `handleAlerts`.
+이메일 알림은 `lib/alerts.mjs`(구독 SQL) + `lib/mail.mjs`(Resend 발송·템플릿) + `lib/http.mjs` 의 `handleAlerts`.
+계정은 `lib/accounts.mjs` + `lib/http.mjs` 의 `handleAccount`.
+**사용자 요청 경로에서 쓰기를 하는 파일은 `lib/alerts.mjs` 와 `lib/accounts.mjs` 둘뿐이다.**
+표는 전부 `lib/render.mjs` 의 `dataTable`+`COL` 로 만든다 — 열 정의가 한곳에 있어야
+페이지마다 순서가 어긋나지 않고, td 의 `data-label` 이 빠지지 않는다(그게 모바일 카드의 열 이름이다).
 
 **시계열은 3단이다.** `player_snapshots`(10분/7일) → `player_hourly`(1시간/90일) → `player_daily`(1일/영구),
 `prune_timeseries()` 가 보관정책을 집행한다. 원시를 그냥 쌓으면 Neon 무료 0.5GB 를 1년 안에 넘긴다.
@@ -89,7 +92,21 @@ GitHub Actions(10분마다 curl 1회) → /api/cron → lib/collect.mjs → Stea
     기준이 갈라지면 사이트맵에 있는데 404 인 URL 이 생겨 색인 전체가 손해를 본다.
 16. **`watchdog` 잡은 이상이 있으면 일부러 던진다.** 실패가 곧 경보다 — 워크플로가 빨개지고
     GitHub 이 소유자에게 메일을 보낸다. "크론이 실패하네" 하고 스케줄을 끄면 경보를 끄는 것이다.
-17. **메일 관련 테스트는 동적 import 를 쓴다.** 설정은 모듈 로드 시점에 `config.mail` 로 굳는데
+17. **계정은 자율이다. 로그인을 요구하는 화면을 만들지 않는다.** 운영자가 정한 선이다 —
+    "회원 가입과 관리는 강제사항이 아니고 자율사항이고, 사이트는 누구나 이용 가능해야 한다."
+    계정이 주는 것은 위시리스트를 기기 사이에서 이어 주는 것 하나뿐이고, 상단 내비에도 올리지 않는다
+    (맨 위의 '로그인'은 '가입해야 쓰는 사이트'로 읽힌다). `check.mjs` 가 익명 접근을 검사한다.
+    근거와 측정 지표는 [docs/PRODUCT.md §8](docs/PRODUCT.md).
+18. **로그인 여부를 CDN 이 캐싱하는 페이지에 렌더링하지 않는다.** 규칙 10 과 같은 이유다.
+    계정 화면 셋(`/account`, `/account/login`, `/account/signup`)만 `no-store` + `noindex` 이고,
+    '지금 누구인가'는 진입점(`api/page.js` · `server.mjs`)이 그 셋에만 `params.user` 로 넘긴다.
+19. **차트 밖 게임의 `captured_at` 은 차트와 같은 값이어야 한다.** 차트는 100개만 주므로
+    나머지는 `GetNumberOfCurrentPlayers` 로 하나씩 묻는데, 시각이 어긋나면 롤업이 같은 10분을
+    두 버킷에 나눠 담아 표본 수가 부풀려진다. 차트 밖 게임에 `rank` 를 적지도 않는다.
+20. **적재 초기에 시간 롤업으로 내려갈 때는 열 이름도 함께 바꾼다.** 48시간을 '7일 추이'라고
+    부르면 이 사이트가 지키는 다른 모든 규율이 무의미해진다 — `sparkSeries()` 가 값과 함께
+    '뭐라고 부를지'를 돌려주는 이유다.
+21. **메일 관련 테스트는 동적 import 를 쓴다.** 설정은 모듈 로드 시점에 `config.mail` 로 굳는데
     ESM 의 `import` 는 파일 첫 줄보다 먼저 실행돼서, `process.env` 를 위에 적어도 늦는다.
 
 ## 환경변수

@@ -11,6 +11,21 @@
 **P0 는 전부 닫혔다.** 파이프라인이 돌고, 페이지가 늘었고, 배포에서 검증했다.
 남은 건 P1(수익화 실장)부터다. 다만 **애드센스 신청은 히스토리가 쌓인 뒤**여야 한다(§4).
 
+**2026-09-06 2차 작업** — 운영자가 정한 방향(PC·모바일 동등, 재방문, 커버리지 200)을 실장했다.
+[TODO.md §9](TODO.md) 의 Phase 1~6 이 닫혔고, 요약은 이렇다.
+
+| 한 것 | 결과 |
+| --- | --- |
+| 모바일 내비 회귀 수정 + 표→카드 전환 | 390/768/1440 세 폭 e2e 통과. 첫 화면 게임 5 / 5 / 6개 |
+| 순위 변동(▲▼NEW) · 위시리스트 Δ | 목록과 위시리스트가 '어제와 무엇이 달라졌나'에 답한다 |
+| 목록 스파크라인 · 홈 '오늘의 변화' · `/status` | 판단까지의 클릭이 1 → 0 |
+| 커버리지 **118 → 200개** | 차트 밖 게임의 동접을 직접 기록. 사이트맵 160 → 257 URL |
+| 로딩 스켈레톤 · 빈 상태 · CSS 미니파이 해제 | 새 페이지당 CSS 추가를 5줄 이하로 유지할 수 있게 됨 |
+| **계정(가입·관리)** | **자율이다** — 로그인을 요구하는 화면은 하나도 없다(PRODUCT.md §8) |
+
+**DB 는 테이블 14개 · 함수 6개가 됐다.** 계정 관련 3개 테이블과 `prune_sessions()` 를
+추가 적용했다(§3-2 의 대조 숫자도 함께 갱신했다).
+
 라이브: https://steamsignal.vercel.app
 
 ---
@@ -62,10 +77,12 @@ GitHub Actions (10분마다 curl 1회)
 | `/game/<appid>-<slug>` | SSR | 동접 차트, 역대 최고 동접, 가격·역대 최저가, 리뷰 추이, 같은 장르 추천 |
 | `/rising` | SSR | 두 시간대 평균 동접 비교. Steam 이 안 주는 우리 콘텐츠 |
 | `/deals` | SSR | 긍정률 75%↑ 할인 + 역대 최저가 판정 |
-| `/charts/weekly` | SSR | 7일 평균 동접 순위 |
+| `/charts/weekly`, `/charts/monthly` | SSR | 7일·30일 평균 동접 순위 |
 | `/genre`, `/genre/<장르>` | SSR | 장르 허브 |
 | `/watchlist` | SSR 껍데기 + JS | 담아 둔 게임의 현재가·평가. localStorage 에만 저장, noindex, `no-store` |
 | `/alerts`, `/alerts/confirm`, `/alerts/unsubscribe` | SSR | 이메일 알림 안내·확인·해지. **메일 설정이 없으면 셋 다 404.** noindex, `no-store` |
+| `/status` | SSR | **수집 상태 공개** — 마지막 수집, 24시간 기록 횟수, 잡별 성패, 결손 구간 |
+| `/account`, `/account/login`, `/account/signup` | SSR | 계정. **자율이다** — 로그인을 요구하는 화면은 없다. noindex, `no-store` |
 | `/privacy`, `/terms`, `/contact` | SSR | 애드센스 심사에 필요한 고정 문서 |
 | `/ads.txt` | SSR | `ADSENSE_PUBLISHER_ID` 가 있을 때만 200, 없으면 404 |
 | `/sitemap.xml`, `/robots.txt` | SSR / 정적 | 색인 |
@@ -79,7 +96,7 @@ GitHub Actions (10분마다 curl 1회)
 
 | 대상 | 상태 |
 | --- | --- |
-| 스키마·함수 실제 실행 | 검증됨 (2026-09-06) — **테이블 11개, 함수 5개**. §3-2 를 반드시 읽을 것 |
+| 스키마·함수 실제 실행 | 검증됨 (2026-09-06 2차) — **테이블 14개, 함수 6개**. §3-2 를 반드시 읽을 것 |
 | 종단 수집 (Steam → Neon) | 검증됨 — 잡 5종 전부 성공 |
 | `/api/cron` 배포 동작 | **검증됨** — 인증 401/200 양쪽, 잡 실행까지 확인 |
 | GitHub Actions 스케줄러 (수동 실행) | **검증됨** — workflow_dispatch 로 종단 성공 (11초) |
@@ -145,7 +162,7 @@ node --env-file=.env -e "import('./lib/db.mjs').then(async({getSql})=>{const s=g
 
 **이 항목의 교훈은 "이 표를 믿지 말라"가 아니라 "이 표를 갱신하라"다.**
 위 §3 의 "스키마·함수 실제 실행 | 검증됨" 이 사고 당시에도 적혀 있었고, 그래서 아무도 의심하지 않았다.
-숫자(테이블 11개 · 함수 5개)를 함께 적어 둔 이유가 이것이다 — 대조할 수 있어야 검증이다.
+숫자(테이블 14개 · 함수 6개)를 함께 적어 둔 이유가 이것이다 — 대조할 수 있어야 검증이다.
 
 **앞으로.** `db/*.sql` 을 건드리는 커밋에는 마이그레이션 실행이 따라와야 한다.
 `npm run db:migrate` 는 `psql` 과 `DATABASE_URL_DIRECT` 를 요구하는데 둘 다 없는 환경이면
@@ -159,7 +176,7 @@ node --env-file=.env -e "import('./lib/db.mjs').then(async({getSql})=>{const s=g
 node --env-file=.env -e "import('./lib/db.mjs').then(async({getSql})=>{const s=getSql();const f=await s\`SELECT proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public'\`;const t=await s\`SELECT tablename FROM pg_tables WHERE schemaname='public'\`;console.log('함수',f.length,'개 / 테이블',t.length,'개')})"
 ```
 
-**함수 5개 · 테이블 11개**가 나와야 한다.
+**함수 6개 · 테이블 14개**가 나와야 한다.
 
 ## 4. 다음 할 일
 
