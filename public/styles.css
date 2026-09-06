@@ -408,16 +408,6 @@ button{
   font-size:12px;
   color:#c0c9bf
 }
-.spotlight-placeholder{
-  grid-column:1/-1;
-  height:224px;
-  border:1px solid var(--line);
-  border-radius:var(--radius);
-  display:grid;
-  place-items:center;
-  color:var(--muted);
-  background:var(--surface)
-}
 .section-heading{
   display:flex;
   align-items:center;
@@ -518,6 +508,34 @@ button{
   border-radius:12px;
   scrollbar-color:#4b5747 var(--surface)
 }
+/* 로딩 자리표시. 홈은 클라이언트 렌더링이라 첫 화면에 빈 상자가 잠깐 보인다.
+   빈 상자는 '없다'로 읽히지만 사실은 '아직 오는 중'이다 — 그래서 모양을 미리 그린다.
+   높이를 실제 내용과 맞춰 두면 값이 도착할 때 화면이 튀지 않는다(CLS).
+   움직임은 prefers-reduced-motion 블록이 통째로 끈다. */
+.skeleton{
+  background:linear-gradient(90deg,#1b211c 25%,#232a24 50%,#1b211c 75%);
+  background-size:220% 100%;
+  animation:skeleton-sweep 1.5s linear infinite;
+  border-radius:6px;
+  color:transparent
+}
+@keyframes skeleton-sweep{
+  from{background-position:120% 0}
+  to{background-position:-120% 0}
+}
+.skeleton-row td{
+  color:transparent
+}
+.skeleton-bar{
+  display:block;
+  height:12px
+}
+.skeleton-thumb{
+  width:96px;
+  height:47px;
+  flex-shrink:0
+}
+
 /* --- 5. 표 --------------------------------------------------------------- */
 
 /* min-width 는 여기 한곳에서만 정한다. SSR 목록은 열이 하나 적어 조금 좁다.

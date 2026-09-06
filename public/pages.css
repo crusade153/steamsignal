@@ -20,9 +20,13 @@
 
 .table-footnote{font-size:12px;line-height:1.8;margin-top:14px;max-width:820px}
 
-.empty-panel{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:34px 26px;text-align:center}
-.empty-panel p{font-size:14px}
-.empty-panel p+p{margin-top:8px;font-size:13px}
+/* 빈 상태는 예외 화면이 아니라 정식 화면이다 — 적재 초기에는 이걸 자주 보게 된다.
+   '기록 중' 표식이 있어야 고장이 아니라 아직 쌓이는 중이라는 게 한눈에 읽힌다. */
+.empty-panel{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:30px 26px;text-align:center}
+.empty-panel p{font-size:14px;max-width:60ch;margin-inline:auto}
+.empty-panel p+p{margin-top:8px;font-size:13px;line-height:1.8}
+.empty-mark{display:inline-flex;align-items:center;gap:7px;margin-bottom:12px;font-size:11px;font-weight:700;letter-spacing:1.2px;color:var(--lime)}
+.empty-mark:before{content:"";width:6px;height:6px;border-radius:50%;background:var(--lime);box-shadow:0 0 0 4px #c3f5680c}
 
 /* --- 게임 상세 ----------------------------------------------------------- */
 

@@ -50,6 +50,8 @@ const imageMarkup = (game, className = 'game-image') => game.headerImage
 
 function renderSpotlights() {
   if (!state.games.length) { $('#spotlights').hidden = true; return; }
+  // 자리표시를 지우는 것도 이 함수의 일이다. 값이 왔는데 스켈레톤이 남아 있으면
+  // 사용자는 '아직 로딩 중'으로 읽는다.
   $('#spotlights').hidden = false;
   $('#spotlights').innerHTML = state.games.slice(0, 3).map((game, i) => `<a class="spotlight" href="${escape(game.path)}">
     ${game.headerImage ? `<img src="${escape(game.headerImage)}" alt="" referrerpolicy="no-referrer">` : ''}<div class="spotlight-top"><span class="spotlight-tag">${i === 0 ? '● HOT RIGHT NOW' : `MOST PLAYED / 0${i + 1}`}</span><span class="spotlight-arrow" aria-hidden="true">↗</span></div>
@@ -170,6 +172,7 @@ function rankMove(game) {
 function renderTable() {
   const { all, games } = pageGames();
   writeUrl();
+  $('#gameRows').removeAttribute('aria-busy');
   const maxPlayers = state.games[0]?.players || 1;
   // data-label 은 장식이 아니다. 720px 아래에서 표가 카드로 바뀌면서 thead 가 숨겨지고,
   // 그때 각 칸이 이 값으로 스스로 이름을 댄다(styles.css §7). 빠지면 숫자만 나열된다.
