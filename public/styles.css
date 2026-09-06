@@ -1353,6 +1353,11 @@ tbody tr:hover{
 }
 
 @media(max-width:720px){
+  /* '오늘의 변화' 타일은 한 줄에 하나씩. 390px 에서 3열로 두면 제목이 두 글자에서 잘려
+     "FINAL …" 만 남는다 — 그건 변화를 알려 주는 게 아니라 궁금하게만 만드는 것이다. */
+  .change-cards{
+    grid-template-columns:1fr
+  }
   /* 첫 화면을 게임에 내준다. 390px 에서 소개 문구가 269px 을 차지하면
      스크롤 없이 보이는 게임이 없어진다 — 기준은 3개다(docs/PRODUCT.md §2-2). */
   .intro{
