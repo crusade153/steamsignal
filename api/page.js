@@ -4,6 +4,7 @@
 // 이 파일은 HTTP 만 담당한다. 무엇을 그릴지는 lib/pages.mjs 가, 무엇을 읽을지는 lib/queries.mjs 가 안다.
 import { lazySql } from '../lib/db.mjs';
 import { HANDLERS, notFound, serverError } from '../lib/pages.mjs';
+import { currentUser } from '../lib/http.mjs';
 import { decodeParam } from '../lib/routes.mjs';
 
 // 경로에서 온 값(slug·genre)과 쿼리에서 온 값(token·state)을 한 모양으로 만들어 넘긴다.
@@ -32,9 +33,15 @@ export default async function handler(req, res) {
 
   let result;
   try {
-    result = handle
-      ? await handle(lazySql(), pageParams(url))
-      : notFound();
+    if (handle) {
+      const params = pageParams(url);
+      // 계정 페이지만 '지금 누구인가'를 본다. 다른 페이지가 로그인 여부로 갈리면
+      // CDN 캐시가 남의 상태를 다른 사람에게 보여 준다(CLAUDE.md 규칙 10 과 같은 이유).
+      if (String(route).startsWith('account')) params.user = await currentUser(lazySql(), req);
+      result = await handle(lazySql(), params);
+    } else {
+      result = notFound();
+    }
   } catch (error) {
     // DB 가 잠깐 흔들려도 스택을 사용자에게 보여 주지 않는다. 원인은 서버 로그에만 남긴다.
     console.error('[page]', route, error);

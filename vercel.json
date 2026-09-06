@@ -89,6 +89,18 @@
       "destination": "/api/page?route=watchlist"
     },
     {
+      "source": "/account/login",
+      "destination": "/api/page?route=accountLogin"
+    },
+    {
+      "source": "/account/signup",
+      "destination": "/api/page?route=accountSignup"
+    },
+    {
+      "source": "/account",
+      "destination": "/api/page?route=account"
+    },
+    {
       "source": "/alerts",
       "destination": "/api/page?route=alerts"
     },

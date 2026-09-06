@@ -264,3 +264,71 @@ CREATE TABLE IF NOT EXISTS mail_deliveries (
   error         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_mail_deliveries_time ON mail_deliveries (created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- 12. users — 회원 계정.
+--
+--     이 사이트는 오랫동안 계정을 만들지 않았다. 위시리스트는 localStorage,
+--     알림은 이메일 하나면 충분했기 때문이다. 2026-09-06 에 운영자가 방향을 바꿨고,
+--     그 판단의 근거와 대가는 docs/PRODUCT.md §7 에 적혀 있다.
+--
+--     설계 규율 넷.
+--       1. **비밀번호 원문을 저장하지 않는다.** scrypt 해시만 남기고, 그 문자열 안에
+--          파라미터·솔트를 함께 담는다(나중에 비용을 올려도 기존 계정이 계속 로그인된다).
+--       2. **계정과 구독은 별개다.** 계정 없이도 이메일 알림을 받을 수 있어야 하고,
+--          계정을 지워도 그 사람이 따로 신청한 구독까지 말없이 지우지 않는다.
+--          연결이 필요할 때만 subscriber_id 가 채워진다.
+--       3. **IP·User-Agent 를 남기지 않는다.** subscribers 와 같은 규율이다.
+--          그래서 남용 방지도 IP 가 아니라 계정별 실패 횟수와 잠금 시각으로 한다.
+--       4. **탈퇴는 진짜 삭제다.** 행을 남겨 두지 않는다. 세션·위시리스트는 CASCADE 로 함께 사라진다.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS users (
+  id             BIGSERIAL   PRIMARY KEY,
+  email          TEXT        NOT NULL UNIQUE,
+  password_hash  TEXT        NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_login_at  TIMESTAMPTZ,
+  failed_logins  SMALLINT    NOT NULL DEFAULT 0,
+  locked_until   TIMESTAMPTZ,
+  subscriber_id  BIGINT      REFERENCES subscribers(id) ON DELETE SET NULL
+);
+
+COMMENT ON COLUMN users.email IS
+  '소문자로 정규화해서 넣는다. 대소문자만 다른 중복 계정이 생기면 같은 사람이 둘이 된다.';
+COMMENT ON COLUMN users.password_hash IS
+  'scrypt$N$r$p$salt$hash (전부 base64url). 파라미터를 문자열에 담아 두면 나중에 비용을 올려도 기존 계정이 계속 로그인된다.';
+COMMENT ON COLUMN users.locked_until IS
+  '연속 실패가 쌓이면 잠근다. IP 를 저장하지 않기 때문에 남용 방지 수단이 이것뿐이다.';
+
+-- ---------------------------------------------------------------------------
+-- 13. user_sessions — 로그인 세션.
+--
+--     **토큰 원문을 저장하지 않는다.** 쿠키에는 무작위 32바이트가 들어가고 DB 에는
+--     그 SHA-256 만 남는다. DB 가 통째로 새어도 그것만으로는 남의 세션을 못 만든다.
+--     (해시 대상이 고엔트로피 난수라 salt 없이 SHA-256 으로 충분하다.)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_sessions (
+  token_hash   TEXT        PRIMARY KEY,
+  user_id      BIGINT      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at   TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_expiry ON user_sessions (expires_at);
+
+-- ---------------------------------------------------------------------------
+-- 14. user_watchlist — 계정에 저장한 위시리스트.
+--
+--     로그인하지 않은 사람의 위시리스트는 여전히 브라우저에만 있다(CLAUDE.md 규칙 10).
+--     로그인하면 이 표가 기기 사이의 공통본이 된다 — 브라우저의 목록과 합쳐서 저장한다.
+--     **합치되 지우지 않는다**: 다른 기기에서 담은 게임이 이 기기의 목록에 없다고 해서
+--     사라지면, 사용자는 그걸 '동기화'가 아니라 '분실'로 겪는다.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_watchlist (
+  user_id  BIGINT      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  appid    INTEGER     NOT NULL REFERENCES apps(appid) ON DELETE CASCADE,
+  added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, appid)
+);
+CREATE INDEX IF NOT EXISTS idx_user_watchlist_app ON user_watchlist (appid);

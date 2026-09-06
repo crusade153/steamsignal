@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { handleApi, handleAlerts } from './lib/http.mjs';
+import { handleApi, handleAlerts, handleAccount, currentUser } from './lib/http.mjs';
 import { matchRoute } from './lib/routes.mjs';
 import { HANDLERS, notFound, serverError, sitemap } from './lib/pages.mjs';
 import { getSql, lazySql } from './lib/db.mjs';
@@ -29,6 +29,7 @@ const server = createServer(async (req, res) => {
   // 배포에서는 파일 하나가 함수 하나다(api/alerts.js). 로컬에서는 여기서 갈라 준다 —
   // 이 분기가 없으면 구독 신청이 읽기 API 로 흘러가 로컬에서만 404 가 난다.
   if (url.pathname === '/api/alerts') return handleAlerts(req, res);
+  if (url.pathname === '/api/account') return handleAccount(req, res);
   if (url.pathname.startsWith('/api/')) return handleApi(req, res);
   if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405, { Allow: 'GET, HEAD' }); res.end(); return; }
 
@@ -37,8 +38,13 @@ const server = createServer(async (req, res) => {
   if (route) {
     const handle = HANDLERS[route.name];
     // 배포의 api/page.js 와 같은 params 모양을 만든다. 알림 페이지는 토큰을 쿼리로 받는다.
+    // 계정 페이지는 '지금 누구인가'를 알아야 한다. 나머지 페이지는 이 값을 쓰지 않는다 —
+    // 로그인 여부로 내용이 갈리는 화면은 CDN 이 캐싱하면 남의 상태를 보여 주기 때문이다.
     const params = { ...route.params, token: url.searchParams.get('token'), state: url.searchParams.get('state') };
-    return renderPage(req, res, () => (handle ? handle(lazySql(), params) : notFound()));
+    return renderPage(req, res, async () => {
+      if (route.name.startsWith('account')) params.user = await currentUser(lazySql(), req);
+      return handle ? handle(lazySql(), params) : notFound();
+    });
   }
 
   try {

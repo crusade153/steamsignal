@@ -27,13 +27,35 @@ export function writeList(ids) {
 
 export const has = appid => readList().includes(appid);
 
+// 계정에도 반영한다 — **로그인한 경우에만.**
+//
+// 로그인 여부는 화면이 알 수 없다. 세션 쿠키가 HttpOnly 라 스크립트가 못 읽고,
+// 그렇다고 서버가 페이지에 "로그인함"을 그려 넣으면 CDN 이 그 화면을 캐싱해
+// 남의 상태를 다른 사람에게 보여 준다(CLAUDE.md 규칙 10 이 막는 바로 그것).
+//
+// 그래서 그냥 보낸다. 로그인하지 않았으면 서버가 401 을 돌려주고 여기서는 아무 일도
+// 일어나지 않는다. 화면은 이 요청의 결과를 기다리지 않는다 — 위시리스트는 계정이
+// 없어도 완전히 동작해야 하고, 계정은 거기에 '기기 사이 연결'만 더하는 것이기 때문이다.
+function syncToAccount(action, payload) {
+  try {
+    fetch('/api/account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ...payload }),
+      keepalive: true
+    }).catch(() => {});
+  } catch { /* 오프라인이거나 차단된 환경. 브라우저 목록은 이미 저장됐다. */ }
+}
+
 export function toggle(appid) {
   const ids = readList();
   const index = ids.indexOf(appid);
   if (index >= 0) ids.splice(index, 1);
   else if (ids.length >= LIMIT) return { ok: false, reason: 'full', added: false };
   else ids.unshift(appid);
-  return { ok: writeList(ids), added: index < 0, count: ids.length };
+  const ok = writeList(ids);
+  if (ok) syncToAccount(index >= 0 ? 'watchlist-remove' : 'watchlist-merge', index >= 0 ? { appid } : { appids: [appid] });
+  return { ok, added: index < 0, count: ids.length };
 }
 
 // --- 목록 화면 ---------------------------------------------------------------

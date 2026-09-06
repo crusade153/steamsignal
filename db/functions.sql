@@ -155,3 +155,18 @@ BEGIN
   RETURN QUERY SELECT pending, dropped, deliveries;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ---------------------------------------------------------------------------
+-- 만료 세션 정리. 용량이 아니라 원칙의 문제다 — 쓸 수 없게 된 세션을 계속 들고 있을 이유가 없다.
+-- prune 잡이 하루 한 번 부른다.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION prune_sessions()
+RETURNS BIGINT AS $$
+DECLARE
+  affected BIGINT;
+BEGIN
+  DELETE FROM user_sessions WHERE expires_at < NOW();
+  GET DIAGNOSTICS affected = ROW_COUNT;
+  RETURN affected;
+END;
+$$ LANGUAGE plpgsql;

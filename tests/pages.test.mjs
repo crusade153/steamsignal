@@ -8,9 +8,13 @@ import { esc, escXml, lineChart, formatDay, won, gameCell, gamePath, safeImage, 
 import {
   parseGameSlug, gamePage, gameReviewsPage, reviewDeltas, risingPage, sitemap, genrePage,
   monthlyPage, dealsLowPage, genreFreePage, genreDiscountedPage, releasePage,
-  RISING_WINDOWS, MIN_COMBO_GAMES
+  RISING_WINDOWS, MIN_COMBO_GAMES, accountPage, accountLoginPage, accountSignupPage
 } from '../lib/pages.mjs';
 import { serializeGame } from '../lib/http.mjs';
+import {
+  hashPassword, verifyPassword, hashToken, newSessionToken,
+  parseAppids, parseEmail, MAX_WATCHLIST
+} from '../lib/accounts.mjs';
 import { LEGAL_HANDLERS } from '../lib/legal.mjs';
 
 // DB 없이 페이지 로직을 검증한다. 쿼리 텍스트에 든 테이블 이름으로 어느 질문인지 알아내고
@@ -559,4 +563,74 @@ test('DB 를 읽지 않는 페이지는 DATABASE_URL 이 없어도 뜬다', asyn
     cwd: new URL('..', import.meta.url), encoding: 'utf8'
   }).trim());
   assert.deepEqual(out, { privacy: 200, terms: 200, contact: 200, watchlist: 200, ads: 404, gameThrows: true });
+});
+
+// --- 계정 -------------------------------------------------------------------
+
+test('비밀번호는 원문을 남기지 않고 같은 값도 매번 다른 해시가 된다', async () => {
+  const one = await hashPassword('correct-horse-battery');
+  const two = await hashPassword('correct-horse-battery');
+  assert.ok(one.startsWith('scrypt$'));
+  assert.notEqual(one, two, '솔트가 매번 달라야 한다 — 같으면 해시가 곧 비밀번호의 지문이 된다');
+  assert.ok(!one.includes('correct-horse'), '원문 조각이 남으면 안 된다');
+  assert.equal(await verifyPassword('correct-horse-battery', one), true);
+  assert.equal(await verifyPassword('correct-horse-batterY', one), false);
+  assert.equal(await verifyPassword('', one), false);
+  // 저장 형식이 깨져도 던지지 않고 그냥 실패해야 한다. 여기서 던지면 로그인 화면이 500 이 된다.
+  assert.equal(await verifyPassword('x', 'not-a-hash'), false);
+  assert.equal(await verifyPassword('x', null), false);
+});
+
+test('해시 문자열이 자기 파라미터를 들고 있어 비용을 올려도 기존 계정이 열린다', async () => {
+  // N 을 낮춰 만든 예전 해시가, 기본값이 올라간 뒤에도 그대로 검증돼야 한다.
+  const old = await hashPassword('long-enough-password', { N: 1024 });
+  assert.ok(old.includes('$1024$'));
+  assert.equal(await verifyPassword('long-enough-password', old), true);
+});
+
+test('세션 토큰은 원문을 저장하지 않는다', () => {
+  const token = newSessionToken();
+  assert.ok(token.length >= 40, '토큰이 짧으면 추측이 가능해진다');
+  assert.notEqual(hashToken(token), token);
+  assert.equal(hashToken(token), hashToken(token));
+});
+
+test('계정 페이지는 색인되지 않고 캐시되지 않는다', async () => {
+  // 사람마다 다른 화면이다. CDN 이 캐싱하면 남의 계정이 보이고,
+  // 색인되면 아무 의미 없는 로그인 폼이 검색 결과에 뜬다.
+  for (const page of [accountLoginPage, accountSignupPage]) {
+    const result = page(fakeSql(), {});
+    assert.equal(result.headers['Cache-Control'], 'no-store');
+    assert.ok(result.body.includes('noindex'));
+    // 계정이 자율이라는 사실이 화면에 적혀 있어야 한다 —
+    // 로그인 화면은 "안 하면 못 쓰나"를 가장 크게 의심하는 자리다.
+    assert.ok(result.body.includes('선택 사항'), '계정이 선택 사항임을 화면이 말해야 한다');
+  }
+});
+
+test('로그인하지 않은 사람에게 계정 화면은 차단이 아니라 안내다', async () => {
+  const result = await accountPage(fakeSql(), {});
+  assert.equal(result.status, 200, '로그인 없이 열어도 404·403 이 아니다');
+  assert.ok(result.body.includes('로그인'));
+});
+
+test('이미 로그인했으면 가입·로그인 화면은 계정으로 보낸다', () => {
+  const user = { id: 1, email: 'a@example.test' };
+  assert.equal(accountLoginPage(fakeSql(), { user }).status, 303);
+  assert.equal(accountSignupPage(fakeSql(), { user }).headers.Location, '/account');
+});
+
+test('계정 위시리스트는 이상한 appid 를 걸러내고 상한을 지킨다', () => {
+  assert.deepEqual(parseAppids('730,570,730'), [730, 570]);
+  assert.deepEqual(parseAppids([730, -1, 0, 'x', 1.5, null]), [730]);
+  assert.equal(parseAppids(Array.from({ length: 500 }, (_, i) => i + 1)).length, MAX_WATCHLIST);
+});
+
+test('이메일은 소문자로 모으고 형식이 아니면 받지 않는다', () => {
+  // 대소문자만 다른 중복 계정이 생기면 같은 사람이 둘이 된다.
+  assert.equal(parseEmail('  Foo@Example.COM '), 'foo@example.com');
+  assert.equal(parseEmail('no-at-sign'), null);
+  assert.equal(parseEmail('a@b'), null);
+  assert.equal(parseEmail(''), null);
+  assert.equal(parseEmail(null), null);
 });

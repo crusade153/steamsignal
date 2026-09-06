@@ -223,6 +223,24 @@ try {
     docsChecked.push(path);
   }
 
+  // 계정은 **자율**이다. 이 세 화면이 열리는 것과, 어느 화면도 로그인을 요구하지 않는 것을 확인한다.
+  // 로그인 없이 못 여는 페이지가 하나라도 생기면 이 사이트는 다른 물건이 된다.
+  const accountChecked = [];
+  for (const path of ['/account/login', '/account/signup', '/account']) {
+    const response = await page.goto(origin + path, { waitUntil: 'domcontentloaded' });
+    assert.equal(response.status(), 200, `${path} 가 ${response.status()} 를 냈다 — 계정 화면은 막지 않고 안내한다`);
+    assert.equal(await page.locator('h1').count(), 1, `${path} must have exactly one h1`);
+    // 사람마다 다른 화면이다. CDN 이 캐싱하면 남의 계정이 보인다.
+    assert.equal(await page.locator('meta[name="robots"]').getAttribute('content'), 'noindex, follow', `${path} must be noindex`);
+    assert.match(await page.locator('body').textContent(), /선택 사항/, `${path} 는 계정이 선택 사항임을 말해야 한다`);
+    accountChecked.push(path);
+  }
+  // 로그인하지 않은 상태에서 사이트의 주요 화면이 전부 열려야 한다.
+  for (const path of ['/', '/watchlist', '/privacy']) {
+    const response = await page.goto(origin + path, { waitUntil: 'domcontentloaded' });
+    assert.equal(response.status(), 200, `익명 방문자에게 ${path} 가 닫혀 있다`);
+  }
+
   // 위시리스트 왕복. 담기는 게임 상세에서, 목록은 /watchlist 에서 확인한다.
   const watched = { appid: 730, title: '위시리스트 픽스처', slug: '730-fixture', path: '/game/730-fixture', headerImage: null, genres: ['액션'], players: 900000, peakToday: 1000000, rank: 1, positiveRatio: 86, reviewTotal: 100, reviewLabel: 'Very Positive', metacritic: null, price: 0, priceFormatted: '무료 플레이', initialPrice: null, discount: 0, isFree: true, playersAt: updatedAt, priceAt: updatedAt, reviewsAt: updatedAt, change: { since: '2026-09-05', rankChange: 1, prevRank: 2, playersChangePct: -8.4, prevAvgPlayers: 982000, priceChange: -500000, prevPrice: 500000, priceChangedAt: updatedAt } };
   await page.route('**/api/game-details*', route => route.fulfill({ json: { games: [watched], retrievedAt: updatedAt } }));
@@ -266,12 +284,14 @@ try {
   assert.deepEqual(errors, [], 'no JavaScript runtime errors');
   const externalFailures = failedResources.filter(item => !item.url.startsWith(origin) && !item.reason?.includes('ERR_ABORTED'));
   // 위에서 일부러 실패시킨 요청들이다. 남겨 두면 진짜 오류와 구분이 안 된다.
-  const expected = ['/game/999999999-nope', '/api/games'];
+  // 위시리스트를 토글하면 계정에도 반영을 시도한다. 로그인하지 않았거나(401)
+  // 이 모드처럼 DB 가 없으면(503) 실패하는 게 정상이다 — 화면은 그 결과를 기다리지 않는다.
+  const expected = ['/game/999999999-nope', '/api/games', '/api/account'];
   console.log(JSON.stringify({
     mode: live ? 'live deployment' : 'deterministic fixtures',
     tested: ['20 rows', '100th rank', 'search', 'sorting', 'real game links',
       ...viewportReport,
-      ...docsChecked, 'watchlist round-trip',
+      ...docsChecked, ...accountChecked, '익명 접근', 'watchlist round-trip',
       ...(live ? ssrChecked : ['escaped titles', 'missing values stay missing', 'API failure state', 'SSR error page'])],
     runtimeErrors: errors,
     externalResourceFailures: externalFailures,
