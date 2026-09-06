@@ -615,6 +615,27 @@ tbody tr:hover{
 .rank-cell.top{
   color:var(--lime)
 }
+/* 순위 변동 칩(▲3 ▼1 NEW). 색은 의미가 있을 때만 쓴다 —
+   오름은 라임, 내림은 빨강, 변화 없음과 기록 없음은 무채색이다. */
+.move{
+  display:block;
+  margin-top:4px;
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:-.2px
+}
+.move.up{
+  color:var(--lime)
+}
+.move.down{
+  color:var(--red)
+}
+.move.flat{
+  color:#6f7b6e
+}
+.move.new{
+  color:var(--amber)
+}
 .game-button{
   display:flex;
   align-items:center;
@@ -1387,6 +1408,10 @@ tbody tr:hover{
     display:inline;
     margin:0 5px 0 0;
     font-size:11px
+  }
+  td.rank-cell .move{
+    display:inline;
+    margin:0 0 0 7px
   }
   td.rank-cell.top{
     color:var(--lime)

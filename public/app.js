@@ -69,6 +69,24 @@ function renderNotices() {
 // 결측은 0 이 아니다. 아직 수집이 그 게임 차례에 닿지 않았다는 뜻으로 적는다.
 const pending = label => `<span class="missing">${label}</span>`;
 
+// 순위 변동 칩. 목록에서 가장 값싼 재방문 장치다 — 어제와 오늘이 다르다는 걸
+// 한 글자로 말해 준다(docs/PRODUCT.md §3).
+//
+// 비교할 직전 순위가 없으면 0 이나 '—' 가 아니라 NEW 다. 다만 NEW 는
+// "우리 기록에서 처음 본다"는 뜻이지 "Steam 에 새로 나왔다"가 아니므로 그렇게 적는다.
+// 어제로 못 박지 않고 실제로 비교한 날짜를 툴팁에 밝힌다 — 차트 밖에 있던 날은
+// 순위가 없어서 그 앞날과 비교되기 때문이다.
+function rankMove(game) {
+  const change = game.change;
+  if (!change || !Number.isFinite(change.rankChange)) {
+    return '<span class="move new" title="이 게임이 순위에 있는 것을 기록상 처음 봅니다">NEW</span>';
+  }
+  const since = change.since ? `${change.since} 최고 ${change.prevRank}위 대비` : '직전 기록 대비';
+  if (change.rankChange > 0) return `<span class="move up" title="${escape(since)}">▲${change.rankChange}</span>`;
+  if (change.rankChange < 0) return `<span class="move down" title="${escape(since)}">▼${-change.rankChange}</span>`;
+  return `<span class="move flat" title="${escape(since)}">—</span>`;
+}
+
 function renderTable() {
   const { all, games } = pageGames();
   writeUrl();
@@ -76,7 +94,7 @@ function renderTable() {
   // data-label 은 장식이 아니다. 720px 아래에서 표가 카드로 바뀌면서 thead 가 숨겨지고,
   // 그때 각 칸이 이 값으로 스스로 이름을 댄다(styles.css §7). 빠지면 숫자만 나열된다.
   $('#gameRows').innerHTML = games.length ? games.map(game => `<tr class="game-row">
-    <td class="rank-cell ${game.rank <= 3 ? 'top' : ''}" data-label="순위">${String(game.rank ?? '—').padStart(2, '0')}</td>
+    <td class="rank-cell ${game.rank <= 3 ? 'top' : ''}" data-label="순위">${String(game.rank ?? '—').padStart(2, '0')}${rankMove(game)}</td>
     <td class="game-cell"><a class="game-button" href="${escape(game.path)}">${imageMarkup(game)}<span class="game-text"><strong>${escape(game.title)}</strong><small>${escape(game.genres.slice(0, 2).join(' · ') || '인기 차트')}</small></span></a></td>
     <td class="numeric" data-label="현재 플레이어"><span class="player-number">${fmt(game.players)}</span><div class="player-track" aria-hidden="true"><i style="width:${Math.max(2, Math.min(100, (game.players || 0) / maxPlayers * 100))}%"></i></div></td>
     <td class="numeric peak-number" data-label="오늘 최고">${fmt(game.peakToday)}</td>

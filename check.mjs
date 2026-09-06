@@ -39,7 +39,15 @@ try {
     metacritic: i === 1 ? null : { score: 85, url: 'https://www.metacritic.com/game/test/' },
     price: i === 1 ? null : 1500000, priceFormatted: i === 1 ? null : '₩ 15,000',
     initialPrice: 3000000, discount: i === 1 ? 0 : 50, isFree: i === 1 ? null : false,
-    playersAt: updatedAt, priceAt: updatedAt, reviewsAt: updatedAt
+    playersAt: updatedAt, priceAt: updatedAt, reviewsAt: updatedAt,
+    // 순위 변동 세 갈래를 다 태운다 — 오름 · 내림 · 비교할 기록 없음(NEW).
+    change: i === 2 ? null : {
+      since: '2026-09-05',
+      rankChange: i % 2 === 0 ? 3 : -1,
+      prevRank: i + 1 + (i % 2 === 0 ? 3 : -1),
+      playersChangePct: 12.5, prevAvgPlayers: 80000,
+      priceChange: -500000, prevPrice: 2000000, priceChangedAt: updatedAt
+    }
   }));
   const chartJson = { games, total: 100, updatedAt, retrievedAt: updatedAt, stale: false, source: 'fixture' };
   if (!live) await page.route('**/api/games', route => route.fulfill({ json: chartJson }));
@@ -62,6 +70,14 @@ try {
     assert.match(second, /집계 전/, 'missing review shows as pending, not 0%');
     assert.match(second, /미제공/);
     assert.match(second, /가격 미확인/);
+
+    // 순위 변동 칩. 목록에서 '어제와 다르다'를 말하는 유일한 장치라 세 갈래를 다 확인한다.
+    // 특히 비교할 기록이 없을 때 0 이나 '—' 가 아니라 NEW 로 나와야 한다 —
+    // 결측을 0 으로 만들지 않는다는 규율이 여기에도 그대로 걸린다.
+    assert.ok(await page.locator('.game-row .move.up').count(), '순위 상승 칩이 없다');
+    assert.ok(await page.locator('.game-row .move.down').count(), '순위 하락 칩이 없다');
+    assert.equal(await page.locator('.game-row .move.new').count(), 1, '비교 기록이 없는 행만 NEW 여야 한다');
+    assert.match(await page.locator('.game-row').nth(0).textContent(), /▲3/);
   }
 
   await mkdir('screenshots', { recursive: true });
@@ -69,8 +85,10 @@ try {
   await page.screenshot({ path: `screenshots/${live ? 'live' : 'test'}-viewport.png` });
 
   await page.getByRole('button', { name: '5페이지', exact: true }).click();
-  assert.equal(await page.locator('.rank-cell').first().textContent(), '81');
-  assert.equal(await page.locator('.rank-cell').last().textContent(), '100');
+  // 순위 칸에는 숫자 뒤에 변동 칩(▲3)이 붙는다. 앞의 숫자만 본다.
+  const rankNumber = async locator => (await locator.textContent()).match(/^\d+/)[0];
+  assert.equal(await rankNumber(page.locator('.rank-cell').first()), '81');
+  assert.equal(await rankNumber(page.locator('.rank-cell').last()), '100');
   assert.equal(await page.getByRole('button', { name: '다음 페이지' }).isDisabled(), true);
 
   const query = live ? (await page.locator('.game-text strong').last().textContent()) : 'Fixture Game 100';
@@ -197,7 +215,7 @@ try {
   }
 
   // 위시리스트 왕복. 담기는 게임 상세에서, 목록은 /watchlist 에서 확인한다.
-  const watched = { appid: 730, title: '위시리스트 픽스처', slug: '730-fixture', path: '/game/730-fixture', headerImage: null, genres: ['액션'], players: 900000, peakToday: 1000000, rank: 1, positiveRatio: 86, reviewTotal: 100, reviewLabel: 'Very Positive', metacritic: null, price: 0, priceFormatted: '무료 플레이', initialPrice: null, discount: 0, isFree: true, playersAt: updatedAt, priceAt: updatedAt, reviewsAt: updatedAt };
+  const watched = { appid: 730, title: '위시리스트 픽스처', slug: '730-fixture', path: '/game/730-fixture', headerImage: null, genres: ['액션'], players: 900000, peakToday: 1000000, rank: 1, positiveRatio: 86, reviewTotal: 100, reviewLabel: 'Very Positive', metacritic: null, price: 0, priceFormatted: '무료 플레이', initialPrice: null, discount: 0, isFree: true, playersAt: updatedAt, priceAt: updatedAt, reviewsAt: updatedAt, change: { since: '2026-09-05', rankChange: 1, prevRank: 2, playersChangePct: -8.4, prevAvgPlayers: 982000, priceChange: -500000, prevPrice: 500000, priceChangedAt: updatedAt } };
   await page.route('**/api/game-details*', route => route.fulfill({ json: { games: [watched], retrievedAt: updatedAt } }));
 
   await page.goto(`${origin}/watchlist`, { waitUntil: 'domcontentloaded' });
@@ -208,7 +226,11 @@ try {
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.locator('#watchlistBody tbody tr').first().waitFor({ timeout: 15000 });
   assert.equal(await page.locator('#watchlistBody tbody tr').count(), 1);
-  assert.match(await page.locator('#watchlistBody tbody tr').first().textContent(), /위시리스트 픽스처/);
+  const watchRow = await page.locator('#watchlistBody tbody tr').first().textContent();
+  assert.match(watchRow, /위시리스트 픽스처/);
+  // 담아 둔 게임이 '지금 얼마인가'만 답하면 매일 열어 볼 이유가 없다. Δ 가 그 이유를 만든다.
+  assert.match(watchRow, /₩5,000 내림/, 'watchlist shows the price delta, not just the price');
+  assert.match(watchRow, /동접 -8\.4%/, 'watchlist shows the player delta');
 
   await page.locator('[data-remove]').first().click();
   await page.locator('#watchlistBody .empty-panel').waitFor({ timeout: 15000 });

@@ -50,6 +50,33 @@ function emptyState() {
   </div>`;
 }
 
+// 담아 둔 게임의 '무엇이 달라졌나'. 현재값만 보여 주면 매일 열어 볼 이유가 없다 —
+// 이 칸 하나가 위시리스트를 목록에서 이유로 바꾼다(docs/PRODUCT.md §3).
+//
+// 규율은 다른 값과 같다. 비교할 근거가 없으면 0 이라고 쓰지 않고 없다고 쓴다.
+// 가격은 '며칠 전'이 아니라 '직전에 달랐던 값' 기준이라, 언제부터 이 가격인지를 함께 적는다.
+function delta(game) {
+  const change = game.change;
+  if (!change) return '<span class="missing">비교할 기록 없음</span>';
+
+  const parts = [];
+  if (Number.isFinite(change.priceChange) && change.priceChange !== 0) {
+    const down = change.priceChange < 0;
+    const amount = fmt(Math.round(Math.abs(change.priceChange) / 100));
+    const since = change.priceChangedAt
+      ? new Intl.DateTimeFormat('ko-KR', { month: 'numeric', day: 'numeric', timeZone: 'Asia/Seoul' }).format(new Date(change.priceChangedAt))
+      : null;
+    parts.push(`<span class="move ${down ? 'up' : 'down'}">${down ? '▼' : '▲'} ₩${amount} ${down ? '내림' : '오름'}</span>` +
+      (since ? `<span class="cell-sub">${escape(since)}부터</span>` : ''));
+  }
+  if (Number.isFinite(change.playersChangePct)) {
+    const up = change.playersChangePct > 0;
+    parts.push(`<span class="move ${up ? 'up' : change.playersChangePct < 0 ? 'down' : 'flat'}">동접 ${up ? '+' : ''}${change.playersChangePct}%</span>` +
+      (change.since ? `<span class="cell-sub">${escape(change.since)} 평균 대비</span>` : ''));
+  }
+  return parts.length ? parts.join('') : '<span class="missing">달라진 것 없음</span>';
+}
+
 function row(game) {
   const price = game.priceFormatted
     ? `<span class="price-value ${game.isFree ? 'free' : ''}">${game.discount > 0 ? `<span class="discount">-${game.discount}%</span>` : ''}${escape(game.priceFormatted)}</span>`
@@ -66,6 +93,7 @@ function row(game) {
   return `<tr>
     <td class="game-cell"><a class="game-button" href="${escape(game.path)}">${image}<span class="game-text"><strong>${escape(game.title)}</strong><small>${escape(game.genres.slice(0, 2).join(' · ') || 'Steam 게임')}</small></span></a></td>
     <td class="numeric price-column" data-label="현재 가격">${price}</td>
+    <td class="numeric" data-label="무엇이 달라졌나">${delta(game)}</td>
     <td class="numeric" data-label="Steam 평가">${review}</td>
     <td class="numeric" data-label="현재 동접">${Number.isFinite(game.players) ? `<span class="player-number">${fmt(game.players)}</span>` : '<span class="missing">차트 밖</span>'}</td>
     <td class="numeric action-cell"><button class="button remove" data-remove="${game.appid}" aria-label="${escape(game.title)} 위시리스트에서 빼기">빼기</button></td>
@@ -100,13 +128,14 @@ async function render() {
       <thead><tr>
         <th scope="col" class="game-column">게임</th>
         <th scope="col" class="numeric price-column">현재 가격</th>
+        <th scope="col" class="numeric">무엇이 달라졌나</th>
         <th scope="col" class="numeric">Steam 평가</th>
         <th scope="col" class="numeric">현재 동접</th>
         <th scope="col" class="numeric">　</th>
       </tr></thead>
       <tbody>${games.map(row).join('')}</tbody>
     </table></div>
-    <p class="muted table-footnote">가격은 한국 스토어 기준이며 게임마다 순서대로 갱신되므로 스토어와 차이가 날 수 있습니다. 구매 전 실제 가격을 확인하세요. 이 목록은 이 브라우저에만 저장됩니다.</p>`;
+    <p class="muted table-footnote"><b>무엇이 달라졌나</b>는 가격이 직전에 달랐던 값과, 동접이 마지막으로 집계된 날의 평균과 비교한 값입니다. '어제'로 못 박지 않고 실제로 비교한 날짜를 함께 적습니다 — 기록이 없는 날을 지어내지 않기 때문입니다. 가격은 한국 스토어 기준이며 게임마다 순서대로 갱신되므로 스토어와 차이가 날 수 있습니다. 구매 전 실제 가격을 확인하세요. 이 목록은 이 브라우저에만 저장됩니다.</p>`;
   } catch (error) {
     status.textContent = '';
     body.innerHTML = `<div class="empty-panel"><p>목록을 불러오지 못했습니다.</p><p class="muted">${escape(error.name === 'TimeoutError' ? '응답이 지연됩니다. 잠시 후 새로고침해 주세요.' : error.message)}</p></div>`;
