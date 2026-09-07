@@ -193,3 +193,12 @@ button.remove{padding:6px 12px;font-size:13px}
 .notice.warn{background:#342c1d;border-color:#685533;color:#eed5a5}
 .notice strong{display:block;margin-bottom:5px;font-size:15px}
 .notice p{font-size:13px;line-height:1.8;margin:0}
+
+/* 콘솔 출시 배지. 목록 표에서 한 눈에 읽혀야 하므로 색이 아니라 **글자**로 구분한다 —
+   색만으로 구분하면 색각 이상에서 세 배지가 같아 보이고, 좁은 화면 카드에서는 더 작아진다. */
+.platform-column{white-space:nowrap}
+.platform-badges{display:inline-flex;gap:4px;flex-wrap:wrap}
+.platform-badge{display:inline-block;padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600;letter-spacing:.02em;border:1px solid var(--line);color:var(--muted);background:#141b14}
+.platform-badge.playstation{color:#8fb8ff;border-color:#2b3d5c}
+.platform-badge.xbox{color:#9be59b;border-color:#2c4a2c}
+.platform-badge.switch{color:#ff9d9d;border-color:#5c2b2b}

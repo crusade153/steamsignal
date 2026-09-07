@@ -144,6 +144,22 @@ const sparkHelp = label => label === '추적군 내 비중 변화'
 // 목록 행의 미니 차트. lib/render.mjs 의 sparkline() 과 같은 규칙이다 —
 // 표본이 셋 미만이면 그리지 않는다. 두 점을 이으면 무조건 직선이 나오는데
 // 그 직선은 추세처럼 보이면서 아무것도 말해 주지 않는다.
+// 콘솔 출시 배지. **없음과 모름을 구분한다** — 빈 배열은 'PC 전용'(확인했는데 콘솔에 없음),
+// null 은 '미확인'(아직 조회하지 않음)이다. 둘을 같게 그리면 정반대의 뜻이 한 칸이 된다.
+const CONSOLES = [
+  { key: 'playstation', short: 'PS' },
+  { key: 'xbox', short: 'Xbox' },
+  { key: 'switch', short: 'NS' }
+];
+
+function consoles(game) {
+  if (!Array.isArray(game.platforms)) return pending('미확인');
+  if (!game.platforms.length) return pending('PC 전용');
+  const owned = new Set(game.platforms);
+  return `<span class="platform-badges">${CONSOLES.filter(item => owned.has(item.key))
+    .map(item => `<span class="platform-badge ${item.key}">${escape(item.short)}</span>`).join('')}</span>`;
+}
+
 function spark(game) {
   const points = (game.spark || []).filter(Number.isFinite);
   if (points.length < 3) return pending('비교 준비 중');
@@ -191,10 +207,11 @@ function renderTable() {
     <td class="numeric" data-label="현재 플레이어"><span class="player-number">${fmt(game.players)}</span><div class="player-track" aria-hidden="true"><i style="width:${Math.max(2, Math.min(100, (game.players || 0) / maxPlayers * 100))}%"></i></div></td>
     <td class="numeric peak-number" data-label="오늘 최고">${fmt(game.peakToday)}</td>
     <td class="spark-cell" data-label="${escape(sparkLabel())}">${spark(game)}</td>
+    <td class="platform-cell" data-label="콘솔">${consoles(game)}</td>
     <td class="numeric review-column" data-label="Steam 평가">${Number.isFinite(game.positiveRatio) ? `<span class="review-score ${scoreClass(game.positiveRatio)}">${game.positiveRatio}%</span><span class="cell-sub">${fmt(game.reviewTotal)}개 리뷰</span>` : pending('집계 전')}</td>
     <td class="numeric" data-label="메타크리틱">${game.metacritic ? `<span class="meta-score ${scoreClass(game.metacritic.score, true)}">${game.metacritic.score}</span>` : pending('미제공')}</td>
     <td class="numeric price-column" data-label="현재 가격">${game.priceFormatted ? `<span class="price-value ${game.isFree ? 'free' : ''}">${escape(game.priceFormatted)}</span>${game.discount > 0 ? `<span class="cell-sub"><span class="discount">-${game.discount}%</span></span>` : ''}` : pending('가격 미확인')}</td>
-  </tr>`).join('') : `<tr><td colspan="8" class="empty">${state.loading && !state.games.length ? '인기 순위를 불러오는 중입니다…' : state.error && !state.games.length ? '순위를 불러오지 못했습니다. 새로고침으로 다시 시도해 주세요.' : '검색에 맞는 게임이 없습니다. TOP 100 안에서 이름이나 게임 ID로 검색해 보세요.'}${state.query ? '<br><button class="button" data-reset-search>검색 초기화</button>' : ''}</td></tr>`;
+  </tr>`).join('') : `<tr><td colspan="9" class="empty">${state.loading && !state.games.length ? '인기 순위를 불러오는 중입니다…' : state.error && !state.games.length ? '순위를 불러오지 못했습니다. 새로고침으로 다시 시도해 주세요.' : '검색에 맞는 게임이 없습니다. TOP 100 안에서 이름이나 게임 ID로 검색해 보세요.'}${state.query ? '<br><button class="button" data-reset-search>검색 초기화</button>' : ''}</td></tr>`;
 
   $('#resultCount').textContent = all.length ? `${all.length}개 게임 · ${(state.page - 1) * pageSize + 1}–${Math.min(state.page * pageSize, all.length)} 표시` : state.loading ? '순위 확인 중' : '0개 게임';
   const missing = games.filter(game => !Number.isFinite(game.positiveRatio) || !game.priceFormatted).length;

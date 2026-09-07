@@ -47,7 +47,9 @@ cron-job.org(주) + GitHub Actions(예비) → /api/cron → lib/collect.mjs →
 **읽기 경로의 층은 서로를 모른다.**
 `lib/routes.mjs`(경로 정의) → `lib/pages.mjs`(본문, `{status, headers, body}` 만 반환하고 HTTP 를 모름)
 → `lib/queries.mjs`(읽기 전용 SQL) / `lib/render.mjs`(레이아웃·포맷터·인라인 SVG 차트, DB 도 Steam 도 모름).
-법적 고정 문서는 `lib/legal.mjs`. 수집은 `lib/collect.mjs`(잡 9종, `discover`·`watchdog` 포함) + `lib/steam.mjs`(수집·검증·동시성) + `lib/db.mjs`.
+법적 고정 문서는 `lib/legal.mjs`. 수집은 `lib/collect.mjs`(잡 10종, `discover`·`watchdog`·`platforms` 포함) + `lib/steam.mjs`(수집·검증·동시성) + `lib/db.mjs`.
+멀티플랫폼 층위는 `lib/platforms.mjs`(Wikidata SPARQL) + `game_sources`·`platform_releases`·`identity_candidates`.
+**기존 Steam 경로와 분리돼 있다** — 이 층위가 통째로 죽어도 기존 화면은 한 칸도 달라지지 않는다.
 이메일 알림은 `lib/alerts.mjs`(구독 SQL) + `lib/mail.mjs`(Resend 발송·템플릿) + `lib/http.mjs` 의 `handleAlerts`.
 계정은 `lib/accounts.mjs` + `lib/http.mjs` 의 `handleAccount`.
 **사용자 요청 경로에서 쓰기를 하는 파일은 `lib/alerts.mjs` 와 `lib/accounts.mjs` 둘뿐이다.**
@@ -126,18 +128,38 @@ cron-job.org(주) + GitHub Actions(예비) → /api/cron → lib/collect.mjs →
 24. **`db/*.sql` 을 고치면 마이그레이션이 반드시 따라온다.** 그 파일들은 저절로 실행되지 않고,
     테스트는 통과하는데 화면의 숫자만 틀린 상태가 만들어진다. `psql` 이 없는 환경에서는
     `npm run db:apply` 가 드라이버로 같은 일을 한다(전부 `IF NOT EXISTS`/`OR REPLACE` 라 반복 적용이 안전하다).
-    적용 뒤 **테이블 14개 · 함수 6개**를 대조한다. 기록은 [HANDOFF §3-2](HANDOFF.md)·[§3-3](HANDOFF.md).
+    적용 뒤 **테이블 17개 · 함수 6개**를 대조한다. 기록은 [HANDOFF §3-2](HANDOFF.md)·[§3-3](HANDOFF.md).
 25. **브랜드 마크는 `public/favicon.svg` 하나다.** 파비콘과 헤더(`lib/render.mjs`·`public/index.html`)가
     그 파일을 직접 참조하므로 고치면 함께 바뀐다. **`og-cover.png` 만 예외로 생성물이라
     `node scripts/og-image.mjs` 를 다시 돌려야 한다** — 안 돌리면 링크 공유 카드에만 옛 마크가 남는다.
     그리고 SVG 안에서는 XML 주석에 하이픈 두 개를 못 쓴다(CSS 변수명을 그대로 적으면 파싱이 깨진다).
+
+26. **플랫폼 층위는 제목으로 잇지 않는다.** Wikidata 의 `P1733`(Steam application ID) 역방향
+    조회만 쓴다. 한 appid 에 항목이 둘 이상이면 고르지 않고 `identity_candidates` 로 보낸다 —
+    고르면 남의 게임 출시일이 화면에 뜨는데 그건 조용히 틀린다. 두 가지가 더 있다:
+    **출시일은 P577 진술의 `pq:P400` 한정어에서만 읽고**(따로 조회하면 카테시안 곱이 나와
+    2020년 게임이 스위치 2에도 2020년에 나온 것처럼 보인다), **`wikibase:timePrecision` 이
+    11(일) 이상일 때만 날짜로 쓴다**(연도만 아는 값이 `2027-01-01` 로 와서 1월 1일 출시로 굳는다).
+    셋 다 실제로 났던 사고다. QID 는 추측하지 말고 확인할 것 — `Q11208` 은 Xbox 가 아니라
+    'The Pentagon' 이다. 이 층위는 Steam 수집과 분리돼 있어서 하루 종일 실패해도 기존 화면은 그대로다.
+
+27. **저장소 예산은 코드에 못 박지 않는다.** `prune` 은 매번 `pg_database_size()` 를 재고
+    `planRetention()` 이 사용률로 그 회차의 보관 기간을 정해 `prune_timeseries()` 에 인자로 넘긴다
+    (70% 넘으면 원시 5일·시간 60일, 85% 넘으면 3일·30일). 예산과 평상시 기간은 환경변수라
+    요금제를 올리거나 커버리지를 늘려도 마이그레이션이 필요 없다.
+    **셋만 지키면 된다 — 일 롤업은 어느 단계에서도 줄이지 않는다. 원시는 3일 밑으로 내려가지 않는다**
+    (`rollup_player_daily(2)` 가 이틀 치 원시를 다시 읽어 온전한 하루를 조각으로 덮는다 — 규칙 23 과 같은 사고).
+    **용량을 못 쟀으면 조이지 않는다.** 근거는 [docs/DATA-PIPELINE.md §2-1](docs/DATA-PIPELINE.md).
 
 ## 환경변수
 
 `DATABASE_URL`(**반드시 `-pooler`**) · `DATABASE_URL_DIRECT`(마이그레이션 전용) · `CRON_SECRET`(없으면 `/api/cron` 은 항상 401)
 · `SITE_URL` · `ADSENSE_PUBLISHER_ID` · `ADSENSE_SLOT_DETAIL` · `CONTACT_EMAIL` · `VERCEL_WEB_ANALYTICS=1`
 · `RESEND_API_KEY` + `MAIL_FROM`(둘 다 있어야 이메일 알림이 켜진다. 하나만 넣으면 꺼진 것과 같다).
+플랫폼 층위(Wikidata)에는 키가 필요 없다 — 공개 SPARQL 엔드포인트다.
 자세한 동작은 [.env.example](.env.example) 과 README 의 설정 표에 있다.
+저장소: `DB_SIZE_BUDGET_MB`(기본 512) · `RETENTION_SNAPSHOT_DAYS`(기본 7) · `RETENTION_HOURLY_DAYS`(기본 90).
+셋 다 없어도 돌아가며, 넣으면 보관정책·`/status`·감시 경보가 함께 따라간다(규칙 26).
 `VERCEL_WEB_ANALYTICS` 는 **Vercel 대시보드에서 Analytics 를 켠 뒤에** 넣는다 — 순서를 바꾸면 방문자마다 404 가 나간다.
 
 ## 문서

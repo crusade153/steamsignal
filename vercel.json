@@ -61,6 +61,14 @@
       "destination": "/api/page?route=genres"
     },
     {
+      "source": "/platform/:key",
+      "destination": "/api/page?route=platform&key=:key"
+    },
+    {
+      "source": "/platform",
+      "destination": "/api/page?route=platforms"
+    },
+    {
       "source": "/genre/:genre/free",
       "destination": "/api/page?route=genreFree&genre=:genre"
     },

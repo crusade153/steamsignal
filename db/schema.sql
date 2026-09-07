@@ -343,3 +343,73 @@ CREATE TABLE IF NOT EXISTS user_watchlist (
   PRIMARY KEY (user_id, appid)
 );
 CREATE INDEX IF NOT EXISTS idx_user_watchlist_app ON user_watchlist (appid);
+
+-- ---------------------------------------------------------------------------
+-- 15. game_sources — 이 게임이 다른 데이터 출처에서 무엇으로 불리는가.
+--
+--     **멀티플랫폼 층위의 뿌리다.** Steam appid 는 여전히 이 사이트의 기본 키지만,
+--     Xbox·PlayStation·Switch 는 appid 를 모른다. 그 사이를 잇는 것이 이 표다.
+--
+--     매칭 규율 하나 — **제목으로 잇지 않는다.** Wikidata 의 P1733(Steam application ID)
+--     역방향 조회만 쓴다. appid 는 Steam 이 발급한 고유값이라 오매칭이 원천적으로 없다.
+--     같은 appid 에 항목이 둘 이상이면 잇지 않고 identity_candidates 로 보낸다 —
+--     리메이크·에디션·동명 게임이 섞이면 "다른 게임의 출시일"을 보여 주게 된다.
+--
+--     wikipedia_title 은 지금 쓰지 않는다. 다음 단계(Wikimedia 조회수)의 조회 키라
+--     이미 받아 온 김에 함께 저장해 둔다 — 나중에 205개를 다시 크롤링하지 않기 위해서다.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS game_sources (
+  appid            INTEGER     PRIMARY KEY REFERENCES apps(appid) ON DELETE CASCADE,
+  wikidata_id      TEXT,
+  wikipedia_title  TEXT,
+  match_status     TEXT        NOT NULL DEFAULT 'unmatched',
+  checked_at       TIMESTAMPTZ,
+  matched_at       TIMESTAMPTZ,
+  CONSTRAINT game_sources_status CHECK (match_status IN ('matched', 'unmatched', 'ambiguous'))
+);
+CREATE INDEX IF NOT EXISTS idx_game_sources_cursor ON game_sources (checked_at NULLS FIRST);
+
+COMMENT ON COLUMN game_sources.match_status IS
+  'matched=항목 하나로 확정 / unmatched=Wikidata 에 없음 / ambiguous=둘 이상이라 사람이 봐야 함. 셋을 구분해야 "아직 안 봤다"와 "봤는데 없다"가 섞이지 않는다.';
+COMMENT ON COLUMN game_sources.checked_at IS
+  '조회를 시도한 시각. 성공·실패 모두 전진시킨다 — 안 그러면 Wikidata 에 없는 게임이 큐 맨 앞에서 영원히 재시도된다(CLAUDE.md 규칙 6).';
+
+-- ---------------------------------------------------------------------------
+-- 16. platform_releases — 이 게임이 어느 플랫폼에 언제 나왔나.
+--
+--     **콘솔 동접·가격을 저장하는 표가 아니다.** 세 콘솔은 그것을 공개하지 않는다.
+--     여기 들어오는 것은 공개된 사실(출시 플랫폼과 날짜)뿐이다.
+--
+--     released_on 이 NULL 인 행은 버린 데이터가 아니라 **"플랫폼은 확실한데 날짜는 미상"** 이다.
+--     실제로 Wikidata 에서 플랫폼 246건 중 날짜까지 있는 것은 100건 남짓이다.
+--     여기서 NULL 을 지어내면 이 사이트가 다른 미러와 같아진다(CLAUDE.md 규칙 4).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS platform_releases (
+  appid        INTEGER     NOT NULL REFERENCES apps(appid) ON DELETE CASCADE,
+  platform     TEXT        NOT NULL,
+  released_on  DATE,
+  source       TEXT        NOT NULL DEFAULT 'wikidata',
+  observed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (appid, platform)
+);
+CREATE INDEX IF NOT EXISTS idx_platform_releases_day ON platform_releases (platform, released_on DESC);
+
+COMMENT ON COLUMN platform_releases.platform IS
+  'xbox / playstation / switch. 세대(원/시리즈, PS4/PS5, 스위치1/2)는 묶는다 — 사용자가 묻는 것은 "내 기계에 있나"이지 세대별 이력이 아니다.';
+COMMENT ON COLUMN platform_releases.released_on IS
+  'DATE 다. 꺼낼 때 반드시 TO_CHAR(.., ''YYYY-MM-DD'') 를 쓴다(CLAUDE.md 규칙 7). 같은 플랫폼에 날짜가 여럿이면(지역·에디션) 가장 이른 날을 쓴다.';
+
+-- ---------------------------------------------------------------------------
+-- 17. identity_candidates — 자동으로 잇지 않고 사람에게 넘긴 후보.
+--
+--     한 appid 에 Wikidata 항목이 둘 이상 걸리는 경우가 있다(리메이크가 원작의 appid 를
+--     쓰거나, 번들·에디션이 따로 항목을 가진 경우). **그때 하나를 고르지 않는다.**
+--     고르면 언젠가 남의 게임 출시일이 화면에 뜨고, 그건 조용히 틀린다.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS identity_candidates (
+  appid        INTEGER     NOT NULL REFERENCES apps(appid) ON DELETE CASCADE,
+  wikidata_id  TEXT        NOT NULL,
+  reason       TEXT        NOT NULL DEFAULT 'multiple-matches',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (appid, wikidata_id)
+);

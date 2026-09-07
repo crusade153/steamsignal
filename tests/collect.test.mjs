@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCollector, slugify, parseReleaseDate, evaluateHealth, HEALTH_LIMITS } from '../lib/collect.mjs';
+import { createCollector, slugify, parseReleaseDate, evaluateHealth, HEALTH_LIMITS, planRetention } from '../lib/collect.mjs';
+import { RETENTION, RETENTION_FLOOR, STORAGE_BUDGET_BYTES } from '../lib/db.mjs';
 
 // 태그드 템플릿 sql 을 흉내내어 실제 DB 없이 적재 로직(페이로드 모양, 커서 전진, 덮어쓰기 방지)을 검증한다.
 function fakeSql({ targets = [], snapshots = [] } = {}) {
@@ -296,4 +297,136 @@ test('로스터 확장은 게임이 아닌 앱을 넣지 않는다', async () =>
   const rows = JSON.parse(insert.values.find(v => typeof v === 'string' && v.startsWith('[')));
   assert.deepEqual(rows.map(row => row.appid), [900]);
   assert.equal(rows[0].slug, '900-게임-900');
+});
+
+// --- 저장소 예산 -------------------------------------------------------------
+//
+// 0.5GB 는 지키라고 있는 벽이 아니라 넘으면 쓰기가 막히는 벽이다. 그래서 보관 기간을
+// 코드에 못 박지 않고 사용률로 정하는데, 그 판정이 틀리면 두 방향으로 조용히 망가진다 —
+// 안 조여서 한도에 닿거나, 너무 조여서 일 롤업이 조각으로 덮인다(규칙 23).
+test('여유가 있으면 평상시 보관 기간을 그대로 쓴다', () => {
+  const plan = planRetention({ usedBytes: 100 * 1024 * 1024, budgetBytes: 512 * 1024 * 1024 });
+  assert.equal(plan.level, 'ok');
+  assert.equal(plan.snapshotDays, RETENTION.snapshotDays);
+  assert.equal(plan.hourlyDays, RETENTION.hourlyDays);
+});
+
+test('예산의 70% 를 넘으면 창을 좁히고 85% 를 넘으면 더 좁힌다', () => {
+  const budgetBytes = 512 * 1024 * 1024;
+  const tight = planRetention({ usedBytes: budgetBytes * 0.75, budgetBytes });
+  assert.equal(tight.level, 'tight');
+  assert.equal(tight.snapshotDays, 5);
+  assert.equal(tight.hourlyDays, 60);
+
+  const critical = planRetention({ usedBytes: budgetBytes * 0.95, budgetBytes });
+  assert.equal(critical.level, 'critical');
+  assert.equal(critical.hourlyDays, 30);
+});
+
+// 원시가 3일 밑으로 내려가면 rollup_player_daily(2) 가 이미 지워진 이틀을 다시 읽고,
+// 온전한 하루를 조각으로 덮어쓴다. 일 롤업은 prune 대상이 아니라 그 조각이 영구 보관된다.
+test('아무리 조여도 원시 보관은 3일 밑으로 내려가지 않는다', () => {
+  const budgetBytes = 512 * 1024 * 1024;
+  const plan = planRetention({ usedBytes: budgetBytes * 0.99, budgetBytes });
+  assert.equal(plan.snapshotDays, RETENTION_FLOOR.snapshotDays);
+  assert.ok(plan.snapshotDays >= 3);
+  // 일 롤업 기간은 계획에 아예 없다. 어떤 압박에서도 영구 보관이다.
+  assert.equal(plan.dailyDays, undefined);
+});
+
+test('용량을 재지 못하면 조이지 않는다 — 모르는 것을 위험으로 읽어 지우지 않는다', () => {
+  const plan = planRetention({ usedBytes: null, budgetBytes: 512 * 1024 * 1024 });
+  assert.equal(plan.level, 'unknown');
+  assert.equal(plan.snapshotDays, RETENTION.snapshotDays);
+  assert.equal(plan.hourlyDays, RETENTION.hourlyDays);
+});
+
+test('prune 은 계산한 보관 기간을 SQL 인자로 넘긴다 — 기간을 바꾸는 데 마이그레이션이 필요 없다', async () => {
+  const calls = [];
+  const budget = 512 * 1024 * 1024;
+  const sql = (strings, ...values) => {
+    const text = strings.join(' ? ').replace(/\s+/g, ' ').trim();
+    calls.push({ text, values });
+    if (text.startsWith('INSERT INTO collector_runs')) return Promise.resolve([{ id: 1 }]);
+    if (text.includes('pg_database_size')) return Promise.resolve([{ total_bytes: String(Math.round(budget * 0.9)) }]);
+    if (text.includes('prune_timeseries')) return Promise.resolve([{ snapshots_deleted: 3, hourly_deleted: 2 }]);
+    if (text.includes('prune_subscriptions')) return Promise.resolve([{ pending_deleted: 0, dropped_deleted: 0, deliveries_deleted: 0 }]);
+    return Promise.resolve([{ rows: 0 }]);
+  };
+  const result = await createCollector({ sql }).run('prune');
+
+  assert.equal(result.storageLevel, 'critical');
+  assert.equal(result.snapshotDays, 3);
+  const prune = calls.find(call => call.text.includes('prune_timeseries'));
+  assert.deepEqual(prune.values, [3, 30]);
+});
+
+test('저장소가 예산을 거의 채우면 감시 잡이 경보한다', () => {
+  const facts = { latest_snapshot: new Date().toISOString(), last_chart_ok: new Date().toISOString() };
+  assert.equal(evaluateHealth({ ...facts, storage_bytes: STORAGE_BUDGET_BYTES * 0.5 }).length, 0);
+  const alerts = evaluateHealth({ ...facts, storage_bytes: STORAGE_BUDGET_BYTES * 0.95 });
+  assert.equal(alerts.length, 1);
+  assert.match(alerts[0], /저장소가 예산의 95%/);
+});
+
+// --- 플랫폼 층위 -------------------------------------------------------------
+
+function platformSql() {
+  const calls = [];
+  const sql = (strings, ...values) => {
+    const text = strings.join(' ? ').replace(/\s+/g, ' ').trim();
+    calls.push({ text, values });
+    if (text.startsWith('INSERT INTO collector_runs')) return Promise.resolve([{ id: 1 }]);
+    if (text.includes('FROM apps a LEFT JOIN game_sources')) return Promise.resolve([{ appid: 730 }, { appid: 440 }]);
+    return Promise.resolve([]);
+  };
+  sql.calls = calls;
+  sql.find = fragment => calls.filter(call => call.text.includes(fragment));
+  sql.payload = fragment => JSON.parse(sql.find(fragment)[0].values.find(v => typeof v === 'string' && v.startsWith('[')));
+  return sql;
+}
+
+test('플랫폼 잡은 확정·모호·미매칭을 구분해 적재한다', async () => {
+  const sql = platformSql();
+  const wikidata = {
+    lookup: async () => ([
+      { appid: 730, status: 'matched', wikidataId: 'Q3', wikipediaTitle: 'Counter-Strike 2', candidates: [], releases: [{ platform: 'xbox', releasedOn: '2020-12-10' }, { platform: 'switch', releasedOn: null }] },
+      { appid: 440, status: 'ambiguous', wikidataId: null, wikipediaTitle: null, candidates: ['Q1', 'Q2'], releases: [] }
+    ])
+  };
+  const result = await createCollector({ sql, wikidata }).run('platforms');
+
+  assert.equal(result.processed, 2);
+  assert.equal(result.matched, 1);
+  assert.equal(result.ambiguous, 1);
+  assert.equal(result.releases, 2);
+  assert.equal(result.dated, 1, '날짜가 없는 플랫폼을 날짜 있는 것으로 세면 커버리지가 부풀려진다');
+
+  // 조회한 것은 성공·실패 없이 전부 커서가 전진해야 한다(규칙 6).
+  assert.deepEqual(sql.payload('INSERT INTO game_sources').map(r => r.match_status), ['matched', 'ambiguous']);
+  // 모호한 게임의 플랫폼은 쓰지 않는다 — 어느 항목의 날짜인지 모른다.
+  assert.deepEqual(sql.payload('INSERT INTO platform_releases').map(r => r.appid), [730, 730]);
+  assert.deepEqual(sql.payload('INSERT INTO identity_candidates').map(r => r.wikidata_id), ['Q1', 'Q2']);
+  // 이미 받아 둔 위키백과 제목을 NULL 로 덮지 않는다.
+  assert.ok(sql.find('INSERT INTO game_sources')[0].text.includes('COALESCE(EXCLUDED.wikipedia_title, game_sources.wikipedia_title)'));
+});
+
+test('Wikidata 가 통째로 죽으면 커서를 전진시키지 않는다', async () => {
+  const sql = platformSql();
+  const wikidata = { lookup: async () => { throw new Error('WDQS HTTP 504'); } };
+  const result = await createCollector({ sql, wikidata }).run('platforms');
+
+  assert.equal(result.status, 'partial');
+  assert.equal(result.failed, 2);
+  // 여기서 전진시키면 WDQS 가 한 시간 아팠던 것 때문에 60개가 '조회했지만 없음'으로 굳는다.
+  assert.equal(sql.find('INSERT INTO game_sources').length, 0);
+  assert.equal(sql.find('INSERT INTO platform_releases').length, 0);
+});
+
+test('플랫폼 잡은 기존 Steam 수집을 건드리지 않는다', async () => {
+  const sql = platformSql();
+  await createCollector({ sql, wikidata: { lookup: async () => [] } }).run('platforms');
+  for (const table of ['player_snapshots', 'app_stats', 'INSERT INTO apps', 'price_events']) {
+    assert.equal(sql.find(table).length, 0, `플랫폼 잡이 ${table} 을 건드렸다`);
+  }
 });

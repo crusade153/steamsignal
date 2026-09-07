@@ -18,6 +18,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
+import { storageUsage } from '../lib/queries.mjs';
 
 const [SCHEMA, FUNCTIONS] = await Promise.all([
   readFile(new URL('../db/schema.sql', import.meta.url), 'utf8'),
@@ -185,5 +186,46 @@ test('보관정책은 원시 7일·시간 90일만 남기고 일 롤업은 건�
     // 일 롤업은 영구 보관이다. 이게 지워지면 '몇 년 전엔 이랬다'가 영영 사라진다.
     const { rows: [left] } = await db.query('SELECT COUNT(*)::int AS n FROM player_daily');
     assert.equal(left.n, 1);
+  } finally { await db.close(); }
+});
+
+// 보관 기간은 이제 Node 가 매번 계산해서 인자로 넘긴다(lib/collect.mjs 의 planRetention).
+// SQL 기본값만 검사하면 '인자를 무시하고 7일로 지우는' 회귀를 놓친다.
+test('보관정책은 넘겨받은 기간을 그대로 쓴다 — 예산이 바뀌면 마이그레이션 없이 따라간다', async () => {
+  const db = await freshDb();
+  try {
+    await db.query(
+      `INSERT INTO player_snapshots (appid, captured_at, players)
+       VALUES ($1, NOW() - INTERVAL '5 days', 1), ($1, NOW() - INTERVAL '1 day', 2)`, [APPID]);
+    await db.query(
+      `INSERT INTO player_hourly (appid, bucket, avg_players, max_players, min_players, samples)
+       VALUES ($1::int, date_trunc('hour', NOW() - INTERVAL '40 days'), 1, 1, 1, 1),
+              ($1::int, date_trunc('hour', NOW() - INTERVAL '10 days'), 2, 2, 2, 1)`, [APPID]);
+
+    // 압박 단계('critical')에서 쓰는 값. 기본값(7·90)이었다면 하나도 지워지지 않는다.
+    const { rows: [pruned] } = await db.query('SELECT * FROM prune_timeseries($1, $2)', [3, 30]);
+    assert.equal(Number(pruned.snapshots_deleted), 1);
+    assert.equal(Number(pruned.hourly_deleted), 1);
+
+    // 조인 뒤에도 일 롤업이 다시 계산할 이틀 치 원시는 남아 있어야 한다(하한 3일의 이유).
+    const { rows: [left] } = await db.query(
+      `SELECT COUNT(*)::int AS n FROM player_snapshots WHERE captured_at >= NOW() - INTERVAL '2 days'`);
+    assert.equal(left.n, 1);
+  } finally { await db.close(); }
+});
+
+// 이 쿼리는 /status 와 prune 이 함께 쓴다. 문법이 깨지면 상태 페이지가 500 이 되고
+// 보관정책은 '용량을 못 쟀다'며 조용히 조이기를 멈춘다 — 둘 다 늦게 드러난다.
+test('저장소 사용량 쿼리는 실제 Postgres 에서 돈다', async () => {
+  const db = await freshDb();
+  try {
+    const tagged = (strings, ...values) =>
+      db.query(strings.reduce((acc, part, i) => acc + part + (i < values.length ? `$${i + 1}` : ''), ''), values)
+        .then(result => result.rows);
+    const [row] = await storageUsage(tagged);
+    assert.ok(Number(row.total_bytes) > 0);
+    const tables = typeof row.tables === 'string' ? JSON.parse(row.tables) : row.tables;
+    assert.ok(Array.isArray(tables) && tables.length > 0);
+    assert.ok(tables.every(t => typeof t.table_name === 'string' && Number(t.bytes) >= 0));
   } finally { await db.close(); }
 });

@@ -4,12 +4,14 @@ import { readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 
 import { ROUTES, rewrites, matchRoute, decodeParam } from '../lib/routes.mjs';
-import { esc, escXml, lineChart, sparkline, formatDay, won, gameCell, gamePath, safeImage, layout, adSlot, dataTable, COL, discountDeadlineCell } from '../lib/render.mjs';
+import { esc, escXml, lineChart, sparkline, formatDay, won, gameCell, gamePath, safeImage, layout, adSlot, dataTable, COL, discountDeadlineCell, CONSOLES } from '../lib/render.mjs';
 import {
   parseGameSlug, gamePage, gameReviewsPage, reviewDeltas, risingPage, sitemap, genrePage,
   monthlyPage, dealsLowPage, genreFreePage, genreDiscountedPage, releasePage,
-  RISING_WINDOWS, MIN_COMBO_GAMES, accountPage, accountLoginPage, accountSignupPage
+  RISING_WINDOWS, MIN_COMBO_GAMES, accountPage, accountLoginPage, accountSignupPage, statusPage, platformSection, platformPage
 } from '../lib/pages.mjs';
+import { PLATFORMS } from '../lib/platforms.mjs';
+import { RETENTION, STORAGE_BUDGET_BYTES } from '../lib/db.mjs';
 import { serializeGame } from '../lib/http.mjs';
 import {
   hashPassword, verifyPassword, hashToken, newSessionToken,
@@ -56,7 +58,7 @@ test('vercel.json 의 rewrites 가 lib/routes.mjs 와 정확히 일치한다', a
 
 test('matchRoute 는 모든 라우트를 잡고 끝 슬래시를 같은 페이지로 본다', () => {
   for (const route of ROUTES) {
-    const path = route.source.replace(':slug', '730-cs2').replace(':genre', '액션').replace(':year', '2024');
+    const path = route.source.replace(':slug', '730-cs2').replace(':genre', '액션').replace(':year', '2024').replace(':key', 'xbox');
     assert.equal(matchRoute(path)?.name, route.name, `${route.source} 가 매칭되지 않았다`);
   }
   assert.equal(matchRoute('/rising/')?.name, 'rising');
@@ -658,4 +660,106 @@ test('이메일은 소문자로 모으고 형식이 아니면 받지 않는다',
   assert.equal(parseEmail('a@b'), null);
   assert.equal(parseEmail(''), null);
   assert.equal(parseEmail(null), null);
+});
+
+// /status 는 저장소 여유를 감추지 않는다. 이 사이트의 진짜 한도가 그것이고,
+// 커버리지를 늘릴 수 있는지도 여기서 결정된다.
+test('수집 상태 페이지는 저장소 사용량과 실제 적용 중인 보관 기간을 적는다', async () => {
+  const sql = fakeSql({
+    'pg_database_size': [{ total_bytes: String(200 * 1024 * 1024), tables: [] }],
+    'MAX(captured_at)': [{ latest_snapshot: '2026-09-05T10:00:00.000Z', ticks_24h: 140, tracked: 200, ranked: 100, dead: 0, snapshot_rows: 10, hourly_rows: 5, daily_rows: 3, first_day: '2026-08-01' }],
+    'FROM collector_runs': [{ job: 'chart', last_status: 'ok', last_run: '2026-09-05T10:00:00.000Z', last_ok: '2026-09-05T10:00:00.000Z', runs_24h: 140, errors_24h: 0 }]
+  });
+  const { status, body } = await statusPage(sql);
+
+  assert.equal(status, 200);
+  assert.match(body, /200MB/);
+  assert.match(body, new RegExp(`예산 ${Math.round(STORAGE_BUDGET_BYTES / 1024 / 1024)}MB`));
+  // 보관 기간은 환경변수라 화면에 못 박으면 언젠가 거짓말이 된다.
+  assert.match(body, new RegExp(`10분 간격 · ${RETENTION.snapshotDays}일 보관`));
+  assert.match(body, new RegExp(`1시간 · ${RETENTION.hourlyDays}일 보관`));
+});
+
+test('저장소를 재지 못해도 상태 페이지는 뜬다', async () => {
+  const { status, body } = await statusPage(fakeSql());
+  assert.equal(status, 200);
+  assert.match(body, /측정하지 못했습니다/);
+});
+
+// --- 플랫폼 층위 -------------------------------------------------------------
+
+// 이 절이 틀리는 방식은 "빈 칸"이 아니라 "그럴듯하게 틀린 문장"이다.
+// 정보가 없는 것과 그 기계엔 안 나온 것은 사용자에게 정반대의 뜻이다.
+test('다른 플랫폼 절은 날짜·미상·없음을 구분해서 적는다', () => {
+  const body = platformSection([
+    { platform: 'playstation', released_on: '2022-02-15' },
+    { platform: 'switch', released_on: null }
+  ]);
+  assert.match(body, /플레이스테이션/);
+  assert.match(body, /2022년 2월 15일 출시/);
+  assert.match(body, /출시일 미상/);
+  // 엑스박스 행은 있어야 하고, 값은 '없음'이어야 한다 — 행 자체를 빼면 "아직 모른다"로 읽힌다.
+  assert.match(body, /엑스박스[\s\S]*?없음/);
+  // 콘솔 동접·가격을 제공하지 않는다는 사실을 화면에서 밝힌다.
+  assert.match(body, /동시접속자와 가격은 제공하지 않습니다/);
+});
+
+test('플랫폼 정보가 하나도 없으면 절을 그리지 않는다', () => {
+  assert.equal(platformSection([]), '');
+  assert.equal(platformSection(undefined), '');
+});
+
+test('게임 상세는 플랫폼 정보가 없어도 그대로 뜬다', async () => {
+  const sql = fakeSql({ 'FROM apps a LEFT JOIN app_stats': [app] });
+  const { status, body } = await gamePage(sql, { slug: '730-counter-strike-2' });
+  assert.equal(status, 200);
+  assert.doesNotMatch(body, /다른 플랫폼/);
+});
+
+test('플랫폼 페이지는 게임이 적으면 404 다 — 링크·사이트맵과 같은 기준', async () => {
+  const thin = Array.from({ length: MIN_COMBO_GAMES - 1 }, (_, i) => ({ ...app, appid: 100 + i }));
+  const result = await platformPage(fakeSql({ 'FROM platform_releases r': thin }), { key: 'switch' });
+  assert.equal(result.status, 404);
+  // 알 수 없는 키도 404 다. 라우트 패턴이 이미 막지만 페이지도 스스로 지킨다.
+  assert.equal((await platformPage(fakeSql(), { key: 'dreamcast' })).status, 404);
+});
+
+test('플랫폼 페이지는 콘솔 동접을 지어내지 않고 Steam 동접이라고 밝힌다', async () => {
+  const rows = Array.from({ length: MIN_COMBO_GAMES }, (_, i) => ({
+    ...app, appid: 200 + i, slug: `${200 + i}-game`, platform_released_on: i === 0 ? '2016-02-17' : null
+  }));
+  const { status, body } = await platformPage(fakeSql({ 'FROM platform_releases r': rows }), { key: 'xbox' });
+
+  assert.equal(status, 200);
+  assert.match(body, /엑스박스 출시/);
+  assert.match(body, /2016년 2월 17일/);
+  // 날짜를 모르는 행은 빈 칸이 아니라 '출시일 미상'이다.
+  assert.match(body, /출시일 미상/);
+  // 이 표의 동접이 어느 플랫폼 것인지 밝히지 않으면 콘솔 동접으로 읽힌다.
+  assert.match(body, /동시접속자는 Steam 의 값입니다/);
+});
+
+test('콘솔 배지는 PC 전용과 미확인을 구분한다', () => {
+  const cell = COL.platforms().cell;
+  assert.match(cell({ platforms: [{ platform: 'xbox' }, { platform: 'switch' }] }), /Xbox[\s\S]*NS/);
+  // 확인했는데 콘솔에 없는 것과, 아직 확인하지 않은 것은 다른 말이다.
+  assert.match(cell({ platforms: [] }), /PC 전용/);
+  assert.match(cell({ platforms: null }), /미확인/);
+});
+
+test('표의 콘솔 키가 수집 쪽 플랫폼 키와 어긋나지 않는다', () => {
+  // render.mjs 는 DB 를 모르는 파일이라 platforms.mjs 를 import 하지 않는다.
+  // 두 목록이 갈라지면 배지가 조용히 안 그려지므로 여기서 묶어 둔다.
+  assert.deepEqual(CONSOLES.map(c => c.key).sort(), PLATFORMS.map(p => p.key).sort());
+});
+
+test('정적 홈의 내비가 SSR 내비와 같은 항목을 가진다', async () => {
+  // 홈(/)만 public/index.html 이고 나머지는 render.mjs 의 layout 이 그린다.
+  // 한쪽에만 메뉴를 넣으면 홈에서만 안 보이는데, 홈이 사람들이 가장 먼저 보는 화면이다.
+  const home = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  const ssr = layout({ title: 't', description: 'd', path: '/rising', body: '' });
+  for (const item of ['/rising', '/deals', '/charts/weekly', '/platform', '/genre', '/watchlist']) {
+    assert.ok(home.includes(`href="${item}"`), `홈 내비에 ${item} 이 없다`);
+    assert.ok(ssr.includes(`href="${item}"`), `SSR 내비에 ${item} 이 없다`);
+  }
 });
