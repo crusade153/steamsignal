@@ -413,3 +413,70 @@ CREATE TABLE IF NOT EXISTS identity_candidates (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (appid, wikidata_id)
 );
+
+-- ---------------------------------------------------------------------------
+-- 18. gamepass_catalog — 지금 Game Pass 에 있는 게임.
+--
+--     **입점·퇴점은 남이 알려 주지 않는다.** 마이크로소프트는 '지금 목록'만 공개하고
+--     "어제와 무엇이 달라졌나"는 어디에도 없다. 그래서 이 사이트가 동접에 하는 일을
+--     똑같이 한다 — 매일 목록을 찍어 두고, 변화는 우리가 비교해서 만든다.
+--
+--     removed_on 이 찬 행을 지우지 않는다. 퇴점 기록이 이 표의 핵심이고,
+--     "예전에 있었는데 빠졌다"는 이야기는 그 행에서만 나온다.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS gamepass_catalog (
+  product_id    TEXT        PRIMARY KEY,
+  title         TEXT        NOT NULL,
+  developer     TEXT,
+  image_url     TEXT,
+  release_date  DATE,
+  on_console    BOOLEAN     NOT NULL DEFAULT FALSE,
+  on_pc         BOOLEAN     NOT NULL DEFAULT FALSE,
+  leaving_soon  BOOLEAN     NOT NULL DEFAULT FALSE,
+  first_seen_on DATE        NOT NULL,
+  last_seen_on  DATE        NOT NULL,
+  removed_on    DATE
+);
+CREATE INDEX IF NOT EXISTS idx_gamepass_present ON gamepass_catalog (removed_on, last_seen_on DESC);
+CREATE INDEX IF NOT EXISTS idx_gamepass_leaving ON gamepass_catalog (leaving_soon) WHERE removed_on IS NULL;
+
+COMMENT ON COLUMN gamepass_catalog.first_seen_on IS
+  '우리가 처음 본 날. 첫 수집(기준선)에서 들어온 행은 이 날짜가 입점일이 아니라 관측 시작일이다 — gamepass_events 에 added 가 없는 것으로 구분한다.';
+COMMENT ON COLUMN gamepass_catalog.release_date IS
+  '9998-12-30 같은 자리표시자는 NULL 로 둔다. 없는 날짜를 출시 예정이라고 적지 않는다.';
+
+-- ---------------------------------------------------------------------------
+-- 19. gamepass_events — 입점·퇴점이 실제로 일어난 날.
+--
+--     제목을 함께 박아 둔다. 퇴점한 게임은 카탈로그에서 사라져 이름을 다시 얻을 수 없다.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS gamepass_events (
+  product_id  TEXT        NOT NULL,
+  event       TEXT        NOT NULL,
+  happened_on DATE        NOT NULL,
+  title       TEXT        NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (product_id, event, happened_on),
+  CONSTRAINT gamepass_events_kind CHECK (event IN ('added', 'removed'))
+);
+CREATE INDEX IF NOT EXISTS idx_gamepass_events_day ON gamepass_events (happened_on DESC, event);
+
+-- ---------------------------------------------------------------------------
+-- 20. gamepass_upcoming — 공식 발표로만 알 수 있는 입점 예정.
+--
+--     카탈로그에는 입점 예정이 없다(실측: 미출시작 1건, 나머지는 자리표시자 날짜).
+--     그래서 Xbox Wire 의 'Coming to Xbox Game Pass' 글에서 읽는다. 산문 파싱이라
+--     **놓치는 것은 받아들이고 틀리는 것은 받아들이지 않는다** — 형식이 안 맞으면 버린다.
+--
+--     출처 URL 을 함께 남긴다. 사람이 원문과 대조할 수 있어야 산문에서 읽은 값을 화면에 올릴 수 있다.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS gamepass_upcoming (
+  title         TEXT        NOT NULL,
+  announced_for DATE        NOT NULL,
+  devices       TEXT,
+  source_url    TEXT        NOT NULL,
+  announced_at  TIMESTAMPTZ NOT NULL,
+  observed_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (title, announced_for)
+);
+CREATE INDEX IF NOT EXISTS idx_gamepass_upcoming_day ON gamepass_upcoming (announced_for);

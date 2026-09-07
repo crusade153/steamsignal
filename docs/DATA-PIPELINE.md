@@ -425,7 +425,7 @@ Slack·Resend 없이 **설정 0개로** 도는 경보 경로가 이것뿐이라 
 | --- | --- |
 | 적재 로직 (페이로드 모양, 커서 전진, 덮어쓰기 방지, 멱등 키) | [tests/collect.test.mjs](../tests/collect.test.mjs) |
 | 읽기·렌더링 (라우팅, 이스케이프, 시간대, 결측 표기, 정규화 301) | [tests/pages.test.mjs](../tests/pages.test.mjs) |
-| `db/schema.sql`, `db/functions.sql` 실제 실행 | 검증됨 — 테이블 17개, 함수 6개 |
+| `db/schema.sql`, `db/functions.sql` 실제 실행 | 검증됨 — 테이블 20개, 함수 6개 |
 | 종단 수집 (Steam → Neon) | 검증됨 — 잡 5종 전부 성공 |
 | `/api/cron` 배포 동작 | 검증됨 — 401/200 양쪽과 잡 실행 |
 | cron-job.org 주 스케줄러 | 검증됨 — 10분 간격 적재 중. 24시간·7일 누적은 아직 확인 필요 |

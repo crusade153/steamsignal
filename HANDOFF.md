@@ -44,7 +44,13 @@ Wikidata 항목에 잇고, Xbox·PlayStation·Switch 출시 여부와 날짜를 
 위키백과 문서 제목 154개도 함께 저장해 뒀다(다음 단계인 조회수 수집의 조회 키다).
 새 URL 은 만들지 않았다 — 매칭 품질이 확인된 뒤에 연다([PRODUCT.md §9](docs/PRODUCT.md)).
 
-**DB 는 테이블 17개 · 함수 6개가 됐다.** 계정 관련 3개 테이블과 `prune_sessions()` 를
+**Game Pass 입퇴점 탭을 붙였다(2026-09-07).** 마이크로소프트는 '지금 목록'만 공개하므로
+하루 한 번 카탈로그(콘솔 558 · PC 472, 합계 728)를 찍어 전날과 비교해 **입점·퇴점을 우리가 만든다.**
+'곧 종료' 9건은 공식 컬렉션이 주고, 입점 예정은 카탈로그에 없어 Xbox Wire 공식 글을 파싱한다.
+첫 수집은 기준선이라 사건이 0건이고 **내일부터 쌓인다.**
+미문서 엔드포인트라 핵심 의존성이 아니다 — 막히면 `/gamepass` 절이 빌 뿐이다.
+
+**DB 는 테이블 20개 · 함수 6개가 됐다.** 계정 관련 3개 테이블과 `prune_sessions()` 를
 추가 적용했다(§3-2 의 대조 숫자도 함께 갱신했다).
 
 라이브: https://steamsignal.vercel.app
@@ -117,7 +123,7 @@ cron-job.org (주 스케줄러) + GitHub Actions (예비 트리거)
 
 | 대상 | 상태 |
 | --- | --- |
-| 스키마·함수 실제 실행 | 검증됨 (2026-09-07) — **테이블 17개, 함수 6개**. §3-2 를 반드시 읽을 것 |
+| 스키마·함수 실제 실행 | 검증됨 (2026-09-07) — **테이블 20개, 함수 6개**. §3-2 를 반드시 읽을 것 |
 | 종단 수집 (Steam → Neon) | 검증됨 — 잡 5종 전부 성공 |
 | `/api/cron` 배포 동작 | **검증됨** — 인증 401/200 양쪽, 잡 실행까지 확인 |
 | GitHub Actions 스케줄러 (수동 실행) | **검증됨** — workflow_dispatch 로 종단 성공 (11초) |
@@ -184,7 +190,7 @@ node --env-file=.env -e "import('./lib/db.mjs').then(async({getSql})=>{const s=g
 
 **이 항목의 교훈은 "이 표를 믿지 말라"가 아니라 "이 표를 갱신하라"다.**
 위 §3 의 "스키마·함수 실제 실행 | 검증됨" 이 사고 당시에도 적혀 있었고, 그래서 아무도 의심하지 않았다.
-숫자(테이블 17개 · 함수 6개)를 함께 적어 둔 이유가 이것이다 — 대조할 수 있어야 검증이다.
+숫자(테이블 20개 · 함수 6개)를 함께 적어 둔 이유가 이것이다 — 대조할 수 있어야 검증이다.
 
 **앞으로.** `db/*.sql` 을 건드리는 커밋에는 마이그레이션 실행이 따라와야 한다.
 `npm run db:migrate` 는 `psql` 과 `DATABASE_URL_DIRECT` 를 요구하는데 둘 다 없는 환경이면
@@ -198,7 +204,7 @@ node --env-file=.env -e "import('./lib/db.mjs').then(async({getSql})=>{const s=g
 node --env-file=.env -e "import('./lib/db.mjs').then(async({getSql})=>{const s=getSql();const f=await s\`SELECT proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public'\`;const t=await s\`SELECT tablename FROM pg_tables WHERE schemaname='public'\`;console.log('함수',f.length,'개 / 테이블',t.length,'개')})"
 ```
 
-**함수 6개 · 테이블 17개**가 나와야 한다.
+**함수 6개 · 테이블 20개**가 나와야 한다.
 
 ### 3-3. 롤업 창이 버킷을 자르고 있었다 (2026-09-06 3차 발견, DB 적용 대기)
 

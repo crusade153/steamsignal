@@ -8,7 +8,7 @@ import { esc, escXml, lineChart, sparkline, formatDay, won, gameCell, gamePath, 
 import {
   parseGameSlug, gamePage, gameReviewsPage, reviewDeltas, risingPage, sitemap, genrePage,
   monthlyPage, dealsLowPage, genreFreePage, genreDiscountedPage, releasePage,
-  RISING_WINDOWS, MIN_COMBO_GAMES, accountPage, accountLoginPage, accountSignupPage, statusPage, platformSection, platformPage
+  RISING_WINDOWS, MIN_COMBO_GAMES, accountPage, accountLoginPage, accountSignupPage, statusPage, platformSection, platformPage, gamepassPage
 } from '../lib/pages.mjs';
 import { PLATFORMS } from '../lib/platforms.mjs';
 import { RETENTION, STORAGE_BUDGET_BYTES } from '../lib/db.mjs';
@@ -762,4 +762,31 @@ test('정적 홈의 내비가 SSR 내비와 같은 항목을 가진다', async (
     assert.ok(home.includes(`href="${item}"`), `홈 내비에 ${item} 이 없다`);
     assert.ok(ssr.includes(`href="${item}"`), `SSR 내비에 ${item} 이 없다`);
   }
+});
+
+test('Game Pass 페이지는 우리가 만든 기록과 마이크로소프트가 밝힌 값을 구분해서 적는다', async () => {
+  const sql = fakeSql({
+    'AS present': [{ present: 728, console_games: 558, pc_games: 473, leaving: 9, gone: 0, events: 0, watching_since: '2026-09-07', last_seen: '2026-09-07' }],
+    'AND leaving_soon': [{ product_id: 'A', title: '곧 나갈 게임', developer: '개발사', on_console: true, on_pc: false }],
+    'FROM gamepass_upcoming': [{ title: '올 게임', announced_for: '2026-09-20', devices: 'Cloud, Console, and PC', source_url: 'https://news.xbox.com/x/' }],
+    'FROM gamepass_events': []
+  });
+  const { status, body } = await gamepassPage(sql);
+
+  assert.equal(status, 200);
+  assert.match(body, /입점 예정/);
+  assert.match(body, /2026년 9월 20일/);
+  assert.match(body, /곧 나갈 게임/);
+  // 관측 시작 전의 입점은 우리가 모른다는 것을 감추지 않는다.
+  assert.match(body, /이전의 입점은 저희가 알 수 없습니다/);
+  // 종료일을 추정해 적지 않는다.
+  assert.match(body, /정확한 종료일은 공개되지 않습니다/);
+  // 첫날이라 비교할 어제가 없다는 것도 그대로 적는다.
+  assert.match(body, /아직 비교할 어제가 없습니다/);
+});
+
+test('Game Pass 수집이 한 번도 안 돌았으면 빈 표 대신 그렇다고 적는다', async () => {
+  const { status, body } = await gamepassPage(fakeSql());
+  assert.equal(status, 200);
+  assert.match(body, /아직 카탈로그를 받지 못했습니다/);
 });

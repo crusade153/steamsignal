@@ -72,5 +72,5 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1].rep
     SELECT COUNT(*)::int AS n FROM pg_proc p JOIN pg_namespace ns ON ns.oid = p.pronamespace
      WHERE ns.nspname = 'public'`;
   const [{ n: tables }] = await sql`SELECT COUNT(*)::int AS n FROM pg_tables WHERE schemaname = 'public'`;
-  console.log(`\n대조: 테이블 ${tables}개 · 함수 ${functions}개 (기대 17 · 6 — HANDOFF §3-2)`);
+  console.log(`\n대조: 테이블 ${tables}개 · 함수 ${functions}개 (기대 20 · 6 — HANDOFF §3-2)`);
 }

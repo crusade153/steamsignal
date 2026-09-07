@@ -69,6 +69,10 @@
       "destination": "/api/page?route=platforms"
     },
     {
+      "source": "/gamepass",
+      "destination": "/api/page?route=gamepass"
+    },
+    {
       "source": "/genre/:genre/free",
       "destination": "/api/page?route=genreFree&genre=:genre"
     },
